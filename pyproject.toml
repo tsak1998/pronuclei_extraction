@@ -23,6 +23,7 @@ scikit-learn = "^1.5.2"
 copula = "^0.0.4"
 copulas = "^0.11.1"
 statsmodels = "^0.14.3"
+pyyaml = "^6.0.2"
 
 
 [build-system]

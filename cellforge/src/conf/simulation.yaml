@@ -1,0 +1,3 @@
+simul_frames: 100
+fps: 60
+experiment_path: "cellforge/simulation_experiments"
