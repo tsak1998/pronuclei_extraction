@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 important_resources
 data
+cellforge/cellforge/simulation_experiments

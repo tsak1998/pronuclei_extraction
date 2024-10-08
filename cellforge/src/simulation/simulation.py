@@ -24,7 +24,10 @@ class Simulation:
 
     def __init__(
         self,
-        stage_path=f"{config.experiment_path}/{datetime.time().isoformat()}.usd"
+        E: float,
+        v: float,
+        damping: float,
+        density: float
     ):
         self.mesh_generator = MeshGenerator()
         self.sim_width = 8
@@ -41,19 +44,18 @@ class Simulation:
         builder = wp.sim.ModelBuilder()
 
         # Set a reasonable default particle
-        radius = 2
-        builder.default_particle_radius = 0.01
-        sphere_resolution: int = 30
-        radius = 3
+        
+        # builder.default_particle_radius = 0.1
+        sphere_resolution: int = 15
+        radius = 1
         sphere_mesh = self.mesh_generator.generate_sphere_mesh(
             radius=radius,
+            center=(0,10,10),
             theta_resolution=sphere_resolution,
             phi_resolution=sphere_resolution)
 
-        E = 50e4
-        v = 0.25
-        damping = 1
-        density = 4000
+       
+     
 
         mesh_physical_props = MeshPhysicalProperties(density=density,
                                                      E=E,
@@ -62,7 +64,7 @@ class Simulation:
         
         for i in range(1):
             mesh_position = MeshPostionProperties(pos=wp.vec3(
-                0.0, 3 + 1 * i, 0.0),
+                0, 10, 10),
                                                   rot=wp.quat_identity(),
                                                   scale=1.0,
                                                   vel=wp.vec3(0.0, 0.0, 0.0))
@@ -83,15 +85,13 @@ class Simulation:
         self.model.enable_tri_collisions = True
 
         self.model.ground = True
-        self.model.soft_contact_ke = 1.0e3
-        self.model.soft_contact_kd = 0.0
-        self.model.soft_contact_kf = 1.0e3
+
 
         self.integrator = wp.sim.SemiImplicitIntegrator()
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
-
+        stage_path = f'{config.experiment_path}/{E}_{v}_{density}_{damping}.usd'
         if stage_path:
             self.renderer = wp.sim.render.SimRenderer(self.model,
                                                       stage_path,
@@ -148,12 +148,7 @@ if __name__ == "__main__":
                         type=str,
                         default=None,
                         help="Override the default Warp device.")
-    parser.add_argument(
-        "--stage_path",
-        type=lambda x: None if x == "None" else str(x),
-        default="example_rigid_soft_contact.usd",
-        help="Path to the output USD file.",
-    )
+    
     parser.add_argument("--num_frames",
                         type=int,
                         default=config.simul_frames,
@@ -161,12 +156,26 @@ if __name__ == "__main__":
 
     args = parser.parse_known_args()[0]
 
-    with wp.ScopedDevice(args.device):
-        example = Simulation(stage_path=args.stage_path)
+    Es = [90e5]
+    vs = [ 0.2]
+    densities = [400]
+    damping = [0.0]
 
-        for _ in range(args.num_frames):
-            example.step()
-            example.render()
+    for E in Es:
+        for v in vs:
+            for density in densities:
+                for d in damping:
+                    try:
+                        with wp.ScopedDevice(args.device):
+                            example = Simulation(E,v,d,density)
 
-        if example.renderer:
-            example.renderer.save()
+                            for fr in range(args.num_frames):
+                                example.step()
+                                example.render()
+
+                            if example.renderer:
+                                example.renderer.save()
+                    except Exception as e:
+                        print(e)
+                        print(E,v,d,density)
+                        continue

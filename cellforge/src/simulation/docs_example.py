@@ -35,6 +35,24 @@ class Example:
         builder = wp.sim.ModelBuilder()
         builder.default_particle_radius = 0.01
 
+
+        builder.add_soft_grid(
+            pos=wp.vec3(0.0, 5.0, 0.0),
+            rot=wp.quat_identity(),
+            vel=wp.vec3(0.0, 0.0, 0.0),
+            dim_x=20,
+            dim_y=10,
+            dim_z=10,
+            cell_x=0.1,
+            cell_y=0.1,
+            cell_z=0.1,
+            density=100.0,
+            k_mu=50000.0,
+            k_lambda=20000.0,
+            k_damp=0.0,
+        )
+
+
         builder.add_soft_grid(
             pos=wp.vec3(0.0, 0.0, 0.0),
             rot=wp.quat_identity(),
@@ -56,6 +74,7 @@ class Example:
 
         self.model = builder.finalize()
         self.model.ground = True
+        self.model.enable_tri_collisions = True
         self.model.soft_contact_ke = 1.0e3
         self.model.soft_contact_kd = 0.0
         self.model.soft_contact_kf = 1.0e3
