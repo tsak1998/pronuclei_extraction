@@ -1,3 +1,4 @@
 simul_frames: 10
 fps: 60
-experiment_path: "cellforge/simulation_experiments/"
+experiment_path: "cellforge/simulation_experiments"
+sim_substeps: 3000
