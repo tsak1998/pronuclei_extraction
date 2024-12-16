@@ -26,6 +26,13 @@ statsmodels = "^0.14.3"
 pyyaml = "^6.0.2"
 tqdm = "^4.66.5"
 taichi = "^1.7.2"
+torch = "^2.5.1"
+torchvision = "^0.20.1"
+pycocotools = "^2.0.8"
+segmentation-models-pytorch = "^0.3.4"
+tsfresh = "^0.20.3"
+opencv-python = "^4.10.0.84"
+torchmetrics = "^1.6.0"
 
 
 [build-system]

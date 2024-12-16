@@ -17,11 +17,7 @@ class MeshGenerator:
                                    phi_resolution=phi_resolution)
 
         tet = tetgen.TetGen(sphere_surface)
-<<<<<<< HEAD
         vertices, elems = tet.tetrahedralize( mindihedral=20, minratio=1.5)
-=======
-        vertices, elems = tet.tetrahedralize(order=1, mindihedral=20, minratio=1.5)
->>>>>>> edc2261 (small scale simulation)
         tetra_indices = elems.flatten()
 
         return TetrahedralMesh(vertices=vertices, tetra_indices=tetra_indices)

@@ -163,3 +163,12 @@ cython_debug/
 important_resources
 data
 cellforge/cellforge/simulation_experiments
+
+*.zip
+*.mp4
+*.json
+*.png
+*.gif
+
+.DS_Store
+*.pt
