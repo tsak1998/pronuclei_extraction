@@ -59,6 +59,7 @@ def train(images: list[ImageFile],
           lr: float,
           n_epochs: int,
           batch_size: int,
+          encoder: str = 'resnet34',
           weights_path: Path | None = None):
 
     train_size = int(len(images) * 0.75)
