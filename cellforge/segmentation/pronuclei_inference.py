@@ -87,5 +87,7 @@ if  __name__ == '__main__':
         slide_id = str(timelapse_pth).split('/')[-1]
         print(slide_id)
 
+        final_images, upscaled_masks, pn_size = inference_whole_slide(model, timelapse_pth,  )
+        
 
 
