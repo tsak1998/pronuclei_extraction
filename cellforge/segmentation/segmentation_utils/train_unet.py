@@ -34,16 +34,17 @@ def dice_loss(y_pred, y_true):
     return 1.0 - dice_coef(y_pred, y_true)
 
 
-def validate(model, val_dataloader, output_last_fn: Callable):
+def validate(model, val_dataloader, output_last_fn: Callable, loss_fn):
     model.eval()
     val_loss = 0.0
     with torch.no_grad():
         progress_bar = tqdm(val_dataloader, total=len(val_dataloader))
+        progress_bar.set_description("Validating...")
         for img_batch, gt_msk_batch in progress_bar:
             img_batch = img_batch.to(device)
             gt_msk_batch = gt_msk_batch.to(device)
             pred_mask = model(img_batch)
-            loss = dice_loss(output_last_fn(pred_mask), gt_msk_batch)
+            loss = loss_fn(output_last_fn(pred_mask), gt_msk_batch.long())
             val_loss += loss.item()
     return val_loss / len(val_dataloader)
 
@@ -80,7 +81,7 @@ def train(
     for epoch in range(n_epochs):
         train_loss = 0.0
         progress_bar = tqdm(train_dataloader, total=len(train_dataloader))
-        progress_bar.set_description("Validating...")
+        progress_bar.set_description("Training...")
         for img_batch, gt_msk_batch in progress_bar:
             img_batch = img_batch.to(device)
             gt_msk_batch = gt_msk_batch.to(device)
@@ -89,13 +90,15 @@ def train(
             match precision:
                 case "full":
                     pred_mask = model(img_batch)
+                    # breakpoint()
                     loss = loss_fn(output_last_fn(pred_mask), gt_msk_batch)
                     loss.backward()
                     optimizer.step()
                 case "mixed":
                     with autocast():
                         pred_mask = model(img_batch)
-                        loss = loss_fn(output_last_fn(pred_mask), gt_msk_batch)
+
+                        loss = loss_fn(output_last_fn(pred_mask), gt_msk_batch.long())
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
@@ -103,7 +106,7 @@ def train(
             train_loss += loss.item()
             progress_bar.set_description(f"Loss: {loss.item():.4f}")
 
-        val_loss = validate(model, val_dataloader, output_last_fn)
+        val_loss = validate(model, val_dataloader, output_last_fn, loss_fn)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), base_model_weight_dir / f"{task_name}.pt")
