@@ -76,3 +76,16 @@ if  __name__ == '__main__':
     model.load_state_dict(torch.load("/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/pronuclei.pt", weights_only=True))
     model.eval()
 
+    path_timelapses = Path('/home/tsakalis/ntua/phd/cellforge/cellforge/data/raw_timelapses/')
+
+
+    all_timelapses = list(path_timelapses.glob('*'))
+
+
+
+    for timelapse_pth in all_timelapses:
+        slide_id = str(timelapse_pth).split('/')[-1]
+        print(slide_id)
+
+
+
