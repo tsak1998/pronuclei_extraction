@@ -96,14 +96,31 @@ class CirclesFit(BaseModel):
         ...
 
 
+def inverse_rotate_point(x, y, rad, center):
+    """
+    Inversely rotate a point (or arrays of points) (x, y) by angle_deg (in degrees)
+    around a given center (cx, cy). This effectively rotates the point by -angle_deg.
+    """
+    # rad = np.deg2rad(-angle_deg)  # Use negative angle for inverse rotation
+    cx, cy = center
+    x_shifted = x - cx
+    y_shifted = y - cy
+    x_new = cx + np.cos(rad) * x_shifted - np.sin(rad) * y_shifted
+    y_new = cy + np.sin(rad) * x_shifted + np.cos(rad) * y_shifted
+    return x_new, y_new
+
+
 def fit_pn_circles(image: Image, mask: Image) -> CirclesFit:
 
     rotated_mask, angle = rotate_image(mask_img)
     centroid, _, major_len, minor_len = mask_orientation_centroid(
         rotated_mask == 1)
 
-    rotated_whole, _ = rotate_image(whole_img, angle)
+    COS_ANGLE = np.cos(np.deg2rad(angle))
+    SIN_ANGLE = np.sin(np.deg2rad(angle))
 
+    ROTATION_MATRIX = np.array([[COS_ANGLE, -SIN_ANGLE],
+                                [SIN_ANGLE, COS_ANGLE]])
     # --- Crop around PN ---
     y0, x0 = centroid
     a1, b1 = int(x0 - major_len * 0.6), int(x0 + major_len * 0.65)
@@ -124,17 +141,76 @@ def fit_pn_circles(image: Image, mask: Image) -> CirclesFit:
     x = half1[:, 1]
     y = -half1[:, 0]
     x0, y0, r = fit_circle(x, y)
+
+    rotated_x, rotated_y = rotated_x, rotated_y = inverse_rotate_point(
+        x0 + a1, -y0 + a2, np.deg2rad(angle), (250, 250))
+    #ROTATION_MATRIX.dot(np.array([x0 + a1, -y0 + a2]))
     print(f"Fitted circle 1: center=({x0:.3f}, {y0:.3f}), radius={r:.3f}")
     # xf, yf = get_circle_pts(x0 + a1, -y0 + a2, r)
 
-    pn_circle1 = PnCircle(x=x0 + a1, y=-y0 + a2, r=r)
+    print(rotated_x, rotated_y)
+    pn_circle1 = PnCircle(x=rotated_x, y=rotated_y, r=r)
 
     x = half2[:, 1]
     y = -half2[:, 0]
     x0, y0, r = fit_circle(x, y)
+    rotated_x, rotated_y = inverse_rotate_point(x0 + a1, -y0 + a2,
+                                                np.deg2rad(angle), (250, 250))
+
+    # ROTATION_MATRIX.dot(
+    #     np.array([x0 + a1 + 250, -y0 + a2 + 250]))
     print(f"Fitted circle 2: center=({x0:.3f}, {y0:.3f}), radius={r:.3f}")
+
+    # breakpoint()
     # xf, yf = get_circle_pts(x0 + a1, -y0 + a2, r)
 
-    pn_circle2 = PnCircle(x=x0 + a1, y=-y0 + a2, r=r)
+    pn_circle2 = PnCircle(x=rotated_x, y=rotated_y, r=r)
+    print(pn_circle1, pn_circle2)
+
+    # --- Inverse rotate circle centers to the original image coordinates ---
+    # Assume the original rotation was done around the center of the image.
+    center = (500 / 2, 500 / 2)
+    # Inverse rotation uses -angle
+    # pn1_x_orig, pn1_y_orig = inverse_rotate_point(pn_circle1.x, pn_circle1.y,
+    #                                               -angle, center)
+    # pn2_x_orig, pn2_y_orig = inverse_rotate_point(pn_circle2.x, pn_circle2.y,
+    #                                               -angle, center)
+
+    pn_circle1_orig = PnCircle(x=pn_circle1.x, y=pn_circle1.y, r=pn_circle1.r)
+    pn_circle2_orig = PnCircle(x=pn_circle1.x, y=pn_circle1.y, r=pn_circle2.r)
 
     return CirclesFit(pn1=pn_circle1, pn2=pn_circle2)
+
+
+# --- Example usage ---
+if __name__ == '__main__':
+    sample_id = 'D2016.01.23_S1202_I149_7'
+    base_pth = Path('/Users/tsakalis/downloads')
+
+    masks_pth = base_pth / f'{sample_id}.npy'
+    timelapse_pth = base_pth / f'{sample_id}_images'
+    all_image_paths = sorted(timelapse_pth.glob('*'),
+                             key=lambda x: int(x.stem.split('_')[0]))[:200]
+    all_masks = np.load(masks_pth)
+
+    frame_idx = 70
+    whole_img = Image.open(all_image_paths[frame_idx])
+    mask_img = Image.fromarray(
+        binary_closing(all_masks[frame_idx]).astype(np.uint8))
+
+    circles_fit = fit_pn_circles(whole_img, mask_img)
+    # print(circles_fit.json(indent=2))
+
+    # Optionally, visualize the result on the original image
+    fig, ax = plt.subplots()
+    ax.imshow(whole_img, cmap='gray')
+    # Get circle points for each PN
+    xf1, yf1 = get_circle_pts(circles_fit.pn1.x, circles_fit.pn1.y,
+                              circles_fit.pn1.r)
+    xf2, yf2 = get_circle_pts(circles_fit.pn2.x, circles_fit.pn2.y,
+                              circles_fit.pn2.r)
+    ax.plot(xf1, yf1, '-', label='PN 1')
+    ax.plot(xf2, yf2, '-', label='PN 2')
+    ax.axis('equal')
+    ax.legend()
+    plt.show()
