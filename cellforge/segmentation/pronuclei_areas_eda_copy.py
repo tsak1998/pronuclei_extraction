@@ -105,10 +105,11 @@ def fit_pn_circles(mask_img: Image.Image) -> CirclesFit:
     a2, b2 = int(y0 - minor_len * 0.6), int(y0 + minor_len * 0.65)
 
     smoothed_img = cv2.GaussianBlur(
-        binary_erosion(rotated_mask)[a2:b2, a1:b1].astype(np.uint8), (15, 15),
+        binary_erosion(rotated_mask)[a2:b2, a1:b1].astype(np.uint8), (9, 9),
         0)
-
+    
     contours = find_contours(smoothed_img, None)
+    
     for contour in contours:
         half1 = contour[contour[:, 1] < smoothed_img.shape[1] // 2]
         half2 = contour[contour[:, 1] > smoothed_img.shape[1] // 2]
@@ -164,11 +165,15 @@ def sample_frames(area: Array, n_samples: int = 5) -> Array:
 
 
 def process_mask_file(mask_pth: Path):
-    sample_id = mask_pth.stem
-    all_masks = np.load(mask_pth)
-    area = np.sum(all_masks, axis=(1, 2))
-    sampled_frames = sample_frames(area)
-    fitted_circles = []
+    try:
+        sample_id = mask_pth.stem
+        all_masks = np.load(mask_pth)
+        area = np.sum(all_masks, axis=(1, 2))
+        sampled_frames = sample_frames(area)
+        fitted_circles = []
+    except Exception as e:
+        print(e, mask_pth)
+        return None
     for frame_idx in sampled_frames:
         mask_img = Image.fromarray(
             binary_closing(all_masks[frame_idx]).astype(np.uint8))
@@ -181,13 +186,16 @@ def process_mask_file(mask_pth: Path):
             "frame": int(frame_idx),
             **circles_fit.model_dump()
         })
-    with open(base_pth / f"{sample_id}.json", 'w') as f:
+    with open(pronuclei_stuff_pth / f"fitted_circles_samples/{sample_id}.json", 'w') as f:
         json.dump(fitted_circles, f)
 
 
 if __name__ == '__main__':
     sample_ids = ['D2016.01.23_S1202_I149_7', 'D2016.01.11_S1183_I149_1']
-    masks_pths = [base_pth / f'{sample_id}.npy' for sample_id in sample_ids]
+
+    pronuclei_stuff_pth = Path('/media/tsakalis/STORAGE/phd/pronuclei_tracking')
+
+    masks_pths = list(((pronuclei_stuff_pth/"masks").glob('*.npy')))
     with Pool() as pool:
         # Wrap imap with tqdm for a progress bar
         list(

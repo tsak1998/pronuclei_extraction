@@ -1,7 +1,9 @@
 import enum
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from pathlib import Path
 from random import shuffle
-from typing import Literal
+from typing import Callable, Literal
 import torch
 import numpy as np
 import torch.nn as nn
@@ -25,12 +27,16 @@ class InferencePrecision(StrEnum):
 
 data_path = Path("/home/tsakalis/ntua/phd/cellforge/cellforge/data/segmentation_data")
 
+from typing import Callable
+
 
 def load_image_folder(
-    folder_data_pth: Path, image_type: Literal["jpg", "png"] = "jpg"
+    folder_data_pth: Path,
+    image_type: Literal["jpg", "png"] = "jpg",
+    sort_fn: Callable = lambda x: x.stem,
 ) -> list:
     image_file_paths = sorted(
-        list((folder_data_pth).glob(f"*.{image_type}")), key=lambda x: x.stem
+        list((folder_data_pth).glob(f"*.{image_type}")), key=sort_fn
     )
 
     progress_bar = tqdm(image_file_paths)
@@ -43,8 +49,9 @@ def inference(model, X, precision: InferencePrecision = InferencePrecision.FULL,
 
     match precision:
         case InferencePrecision.MIXED:
-            with autocast():
-                return model(X, *args)
+            with torch.no_grad():
+                with autocast():
+                    return model(X, *args)
 
         case InferencePrecision.FULL:
             with torch.no_grad():
@@ -108,7 +115,7 @@ def create_all_masks(whole_embryo_segmentation_model: nn.Module):
         images=counter_example_images, masks=counter_example_masks
     )
 
-    dataloader = DataLoader(counter_example_dataset, BATCH_SIZE)
+    dataloader = DataLoader(counter_example_datasbet, BATCH_SIZE)
 
     pronuclei_sample_images = load_image_folder(data_path / "pronuclei/images")
 
@@ -135,7 +142,7 @@ def create_all_masks(whole_embryo_segmentation_model: nn.Module):
             embryo_binary_np = embryo_msk.astype(bool)
             pn_mask = pn_mask.cpu().numpy()
 
-            three_class_mask = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 2)).astype(bool)
+            three_class_mask = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 3)).astype(bool)
 
             three_class_mask[:, :, 0] = embryo_binary_np[
                 0
@@ -158,6 +165,117 @@ def create_all_masks(whole_embryo_segmentation_model: nn.Module):
     # counter_examples_dataset = ImageDataset(images=counter_example_images, masks=counter_example_masks, transform=True)
 
 
+def create_all_masks_separate(whole_embryo_segmentation_model: nn.Module):
+    """
+    This function will take the pronuclei masks and create the other 2 classes.
+
+    We will need some extra samples to be used as counter examples
+    (when pronuclei are not showing).
+
+    """
+    DEVICE = "cuda"
+    BATCH_SIZE = 32
+    MASK_THRESHOLD = 0.9
+    IMAGE_SIZE = 224
+
+    base_cicle_pth = Path("/media/tsakalis/STORAGE/phd/pronuclei_tracking")
+    timelapse_pth = Path(
+        "/home/tsakalis/ntua/phd/cellforge/cellforge/data/raw_timelapses"
+    )
+
+    all_circle_data = list((base_cicle_pth / "fitted_circles_samples").glob("*.json"))
+    import json
+
+    images = []
+    masks = []
+    for circle_file_pth in tqdm(all_circle_data):
+        slide_id = str(circle_file_pth).split("/")[-1][:-5]
+        with open(circle_file_pth) as f:
+            circles = json.load(f)
+
+        for circle in circles:
+            full_frame_pth = timelapse_pth / f"{slide_id}/{circle['frame']}_0.jpg"
+            frame_img = Image.open(full_frame_pth)
+            mask = np.zeros((500, 500, 3), dtype=np.uint8)
+
+            y_grid, x_grid = np.ogrid[:500, :500]
+
+            # Full blob for pn1 on channel 0
+            center1 = (int(circle["pn1"]["x"]), int(circle["pn1"]["y"]))
+            radius1 = int(circle["pn1"]["r"])
+            blob1 = (x_grid - center1[0]) ** 2 + (
+                y_grid - center1[1]
+            ) ** 2 <= radius1**2
+            mask[..., 1][blob1] = 255
+
+            # Full blob for pn2 on channel 1, if available
+            if circle["pn2"]:
+                center2 = (int(circle["pn2"]["x"]), int(circle["pn2"]["y"]))
+                radius2 = int(circle["pn2"]["r"])
+                blob2 = (x_grid - center2[0]) ** 2 + (
+                    y_grid - center2[1]
+                ) ** 2 <= radius2**2
+                mask[..., 2][blob2] = 255
+
+            mask_image = Image.fromarray(mask)
+            images.append(frame_img)
+            masks.append(mask_image)
+
+    dataset = ImageDataset(images=images, masks=masks, transform=False)
+
+    dataloader = DataLoader(dataset=dataset, shuffle=False, batch_size=BATCH_SIZE)
+
+    whole_embryo_segmentation_model.eval()
+    whole_embryo_segmentation_model.to(DEVICE)
+
+    complete_masks = []
+    for batch_im, batch_mask in tqdm(dataloader):
+
+        batch_im = batch_im.to(DEVICE)
+        with torch.no_grad():
+            pred_masks = (
+                torch.sigmoid(
+                    inference(
+                        whole_embryo_segmentation_model,
+                        batch_im,
+                        precision=InferencePrecision.FULL,
+                    )
+                )
+                > 0.1
+            )
+
+        pred_masks = pred_masks.cpu().numpy()
+
+        for prd_msk, msk in zip(pred_masks, batch_mask.cpu().numpy()):
+
+            # breakpoint()
+
+            msk *= 255
+
+            msk[0, ...] = prd_msk.astype(int) * 255
+
+            complete_masks.append(
+                Image.fromarray(msk.astype(np.uint8).transpose(1, 2, 0))
+            )
+            # breakpoint()/
+            # breakpoint()
+
+    final_images = []
+    final_masks = []
+
+    for im, msk in zip(images, complete_masks):
+
+        msk_ar = np.array(msk)[:, :, 0]
+
+        if msk_ar.sum() < 190190:
+            continue
+
+        final_images.append(im)
+        final_masks.append(msk)
+
+    return final_images, final_masks
+
+
 model_weights = Path("/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights")
 
 if __name__ == "__main__":
@@ -172,10 +290,10 @@ if __name__ == "__main__":
     )
 
     model_pronuclei = smp.Unet(
-        encoder_name="resnext101_32x48d",
+        encoder_name="resnext101_32x48d",  # "resnext101_32x48d",
         encoder_weights="instagram",
         in_channels=3,
-        classes=2,
+        classes=3,
     )
 
     model.load_state_dict(
@@ -183,7 +301,7 @@ if __name__ == "__main__":
     )
     model.eval()
 
-    full_images, full_masks = create_all_masks(model)
+    full_images, full_masks = create_all_masks_separate(model)
 
     c = list(zip(full_images, full_masks))
     import random
@@ -195,9 +313,9 @@ if __name__ == "__main__":
     # full_dataset = ImageDataset(images=full_images, masks=full_masks)
     # generator = torch.Generator().manual_seed(42)/
 
-    train_dataset = ImageDataset(full_images[:800], full_masks[:800], transform=True)
+    train_dataset = ImageDataset(full_images[:5000], full_masks[:5000], transform=True)
 
-    val_dataset = ImageDataset(full_images[800:], full_masks[800:])
+    val_dataset = ImageDataset(full_images[5000:], full_masks[5000:])
     # orch.utils.data.random_split(
     #     full_dataset, [0.8, 0.2], generator=generator
     # )
@@ -205,18 +323,19 @@ if __name__ == "__main__":
     type_of_problem = "multilabel"
     # type_of_problem = 'multiclass'
     from segmentation_models_pytorch.losses import DiceLoss
+    del model
+    torch.cuda.empty_cache()
 
     loss_fn = DiceLoss(mode=type_of_problem, log_loss=True, from_logits=True)
     train(
         train_dataset,
         val_dataset,
-        "pronuclei",
+        "pronuclei_seperate_xl",
         lr=1e-5,
-        n_epochs=50,
+        n_epochs=200,
         batch_size=32,
         model=model_pronuclei,
         loss_fn=loss_fn,
         output_last_fn=lambda x: x,
         precision="mixed",
     )
-
