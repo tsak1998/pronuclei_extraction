@@ -16,6 +16,27 @@ from torchvision.transforms.functional import rotate
 from tqdm import tqdm
 from multiprocessing import Pool
 
+from skimage.morphology import skeletonize
+from skimage import data
+import matplotlib.pyplot as plt
+from skimage.util import invert
+
+
+def find_circle_centers(smoothed_img):
+
+    # Invert the horse image
+    image = invert(smoothed_img)
+
+    # perform skeletonization
+    skeleton = skeletonize(image, method='lee')
+
+    coords = np.column_stack(np.where(skeleton))
+
+    # Find the leftmost and rightmost points
+    leftmost = coords[np.argmin(coords[:, 1])]
+    rightmost = coords[np.argmax(coords[:, 1])]
+
+    return leftmost, rightmost
 
 def mask_orientation_centroid(image: np.ndarray):
     label_img = label(image)
@@ -69,8 +90,10 @@ def get_circle_pts(x0, y0, r, npts=100, tmin=0, tmax=2 * np.pi):
 
 # --- Paths & Load ---
 
-base_pth = Path('/Users/tsakalis/downloads')
-
+base_pth = Path("/Users/tsakalis/downloads")
+COUNTER_SPLIT_LEFT = 2.5
+COUNTER_SPLIT_RIGHT = 3.5
+FITTED_RADIUS_INCREASE = 1.05
 
 class PnCircle(BaseModel):
     x: float
@@ -83,8 +106,7 @@ class CirclesFit(BaseModel):
     pn2: Optional[PnCircle] = None
 
     @classmethod
-    def randomize_pns(cls):
-        ...
+    def randomize_pns(cls): ...
 
 
 def inverse_rotate_point(x, y, rad, center):
@@ -98,38 +120,41 @@ def inverse_rotate_point(x, y, rad, center):
 
 def fit_pn_circles(mask_img: Image.Image) -> CirclesFit:
     rotated_mask, angle = rotate_image(mask_img)
-    centroid, _, major_len, minor_len = mask_orientation_centroid(
-        rotated_mask == 1)
+    centroid, _, major_len, minor_len = mask_orientation_centroid(rotated_mask == 1)
     y0, x0 = centroid
     a1, b1 = int(x0 - major_len * 0.6), int(x0 + major_len * 0.65)
     a2, b2 = int(y0 - minor_len * 0.6), int(y0 + minor_len * 0.65)
 
     smoothed_img = cv2.GaussianBlur(
-        binary_erosion(rotated_mask)[a2:b2, a1:b1].astype(np.uint8), (9, 9),
-        0)
-    
+        binary_dilation(rotated_mask[a2:b2, a1:b1]).astype(np.uint8), (9, 9), 0
+    )
+
     contours = find_contours(smoothed_img, None)
-    
+
     for contour in contours:
-        half1 = contour[contour[:, 1] < smoothed_img.shape[1] // 2]
-        half2 = contour[contour[:, 1] > smoothed_img.shape[1] // 2]
+        half1 = contour[contour[:, 1] < smoothed_img.shape[1] // COUNTER_SPLIT_LEFT]
+        half2 = contour[
+            contour[:, 1] > 2 * smoothed_img.shape[1] // COUNTER_SPLIT_RIGHT
+        ]
 
     x = half1[:, 1]
     y = -half1[:, 0]
     x0, y0, r = fit_circle(x, y)
-    rotated_x, rotated_y = inverse_rotate_point(x0 + a1, -y0 + a2,
-                                                np.deg2rad(angle), (250, 250))
-    pn_circle1 = PnCircle(x=float(rotated_x), y=float(rotated_y), r=float(r))
+    rotated_x, rotated_y = inverse_rotate_point(
+        x0 + a1, -y0 + a2, np.deg2rad(angle), (250, 250)
+    )
+    pn_circle1 = PnCircle(x=float(rotated_x), y=float(rotated_y), r=FITTED_RADIUS_INCREASE*float(r))
 
-    if major_len / minor_len < 1.3:
+    if major_len / minor_len < 1.5:
         return CirclesFit(pn1=pn_circle1)
 
     x = half2[:, 1]
     y = -half2[:, 0]
     x0, y0, r = fit_circle(x, y)
-    rotated_x, rotated_y = inverse_rotate_point(x0 + a1, -y0 + a2,
-                                                np.deg2rad(angle), (250, 250))
-    pn_circle2 = PnCircle(x=float(rotated_x), y=float(rotated_y), r=float(r))
+    rotated_x, rotated_y = inverse_rotate_point(
+        x0 + a1, -y0 + a2, np.deg2rad(angle), (250, 250)
+    )
+    pn_circle2 = PnCircle(x=float(rotated_x), y=float(rotated_y), r=FITTED_RADIUS_INCREASE*float(r))
 
     return CirclesFit(pn1=pn_circle1, pn2=pn_circle2)
 
@@ -147,27 +172,27 @@ class Array(np.ndarray, Generic[Shape, DType]):
         xy_points: Array['N,2', float]
         nd_mask: Array['...', bool]
     """
+
     pass
 
 
 def sample_frames(area: Array, n_samples: int = 5) -> Array:
     max_start, max_len = find_signal(area > 10)
-    q_70 = np.quantile(area[max_start:max_start + max_len], 0.5)
-    q_10 = np.quantile(area[max_start:max_start + max_len], 0.15)
-    low_samples = max_start + np.argwhere(area[max_start:max_start +
-                                               max_len] < q_10)
-    high_samples = max_start + np.argwhere(area[max_start:max_start +
-                                                max_len] > q_70)
+    q_70 = np.quantile(area[max_start : max_start + max_len], 0.5)
+    q_10 = np.quantile(area[max_start : max_start + max_len], 0.25)
+    low_samples = max_start + np.argwhere(area[max_start : max_start + max_len] < q_10)
+    high_samples = max_start + np.argwhere(area[max_start : max_start + max_len] > q_70)
     return cast(
         Array,
-        np.random.choice(
-            np.vstack([low_samples, high_samples]).flatten(), n_samples))
+        np.random.choice(np.vstack([low_samples, high_samples]).flatten(), n_samples),
+    )
 
 
 def process_mask_file(mask_pth: Path):
     try:
         sample_id = mask_pth.stem
-        all_masks = np.load(mask_pth)
+
+        all_masks = np.load(mask_pth)["all_masks"]
         area = np.sum(all_masks, axis=(1, 2))
         sampled_frames = sample_frames(area)
         fitted_circles = []
@@ -176,28 +201,26 @@ def process_mask_file(mask_pth: Path):
         return None
     for frame_idx in sampled_frames:
         mask_img = Image.fromarray(
-            binary_closing(all_masks[frame_idx]).astype(np.uint8))
+            binary_closing(all_masks[frame_idx]).astype(np.uint8)
+        )
         try:
             circles_fit = fit_pn_circles(mask_img)
         except Exception as e:
             print(f"Error processing frame {frame_idx} in {sample_id}: {e}")
             continue
-        fitted_circles.append({
-            "frame": int(frame_idx),
-            **circles_fit.model_dump()
-        })
-    with open(pronuclei_stuff_pth / f"fitted_circles_samples/{sample_id}.json", 'w') as f:
+        fitted_circles.append({"frame": int(frame_idx), **circles_fit.model_dump()})
+    with open(
+        pronuclei_stuff_pth / f"fitted_circles_samples/{sample_id}.json", "w"
+    ) as f:
         json.dump(fitted_circles, f)
 
 
-if __name__ == '__main__':
-    sample_ids = ['D2016.01.23_S1202_I149_7', 'D2016.01.11_S1183_I149_1']
+if __name__ == "__main__":
+    sample_ids = ["D2016.01.23_S1202_I149_7", "D2016.01.11_S1183_I149_1"]
 
-    pronuclei_stuff_pth = Path('/media/tsakalis/STORAGE/phd/pronuclei_tracking')
+    pronuclei_stuff_pth = Path("/media/tsakalis/STORAGE/phd/pronuclei_tracking")
 
-    masks_pths = list(((pronuclei_stuff_pth/"masks").glob('*.npy')))
-    with Pool() as pool:
+    masks_pths = list(((pronuclei_stuff_pth / "masks").glob("*.npz")))
+    with Pool(32) as pool:
         # Wrap imap with tqdm for a progress bar
-        list(
-            tqdm(pool.imap(process_mask_file, masks_pths),
-                 total=len(masks_pths)))
+        list(tqdm(pool.imap(process_mask_file, masks_pths), total=len(masks_pths)))

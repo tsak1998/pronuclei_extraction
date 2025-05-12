@@ -1,4 +1,5 @@
 import argparse
+from os import write
 from typing import Callable, Literal
 from pathlib import Path
 
@@ -9,9 +10,13 @@ import torch.nn as nn
 
 from torch.cuda.amp import autocast, GradScaler
 from PIL import Image
+
+from datetime import datetime
 from tqdm import tqdm
 
 from segmentation.segmentation_utils.dataloader import ImageDataset
+from torch.utils.tensorboard import SummaryWriter
+
 
 # Global settings
 device = "cuda" if torch.cuda.is_available() else "mps"
@@ -49,72 +54,130 @@ def validate(model, val_dataloader, output_last_fn: Callable, loss_fn):
     return val_loss / len(val_dataloader)
 
 
+from torch.utils.tensorboard import SummaryWriter
+from torch.optim.lr_scheduler import OneCycleLR, StepLR
+from torch.cuda.amp import autocast, GradScaler
+
+
 def train(
-    train_dataset: ImageDataset,
-    val_dataset: ImageDataset,
-    task_name: Literal["full_embryo", "inner_embryo", "pronuclei", "blastocyst"],
-    lr: float,
-    n_epochs: int,
-    batch_size: int,
-    model: nn.Module,
-    loss_fn: nn.Module,
-    output_last_fn: Callable = lambda x: x,
-    precision: Literal["full", "mixed"] = "full",
-    weights_path: Path | None = None,
+    train_dataset,
+    val_dataset,
+    task_name,
+    lr,
+    n_epochs,
+    batch_size,
+    model,
+    loss_fn,
+    output_last_fn=lambda x: x,
+    precision="full",
+    weights_path=None,
+    warmup_epochs: int = 5,
 ):
-
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size * 2)
-
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size * 2)
     model.to(device)
-    if weights_path is not None:
-        model.load_state_dict(
-            torch.load(base_model_weight_dir / weights_path, weights_only=True)
-        )
+    if weights_path:
+        model.load_state_dict(torch.load(weights_path))
     model.train()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # 1. optimizer with weight decay (no decay on biases / norm layers)
+    param_groups = [
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in ["bias", "norm"])
+            ],
+            "weight_decay": 1e-2,
+        },
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in ["bias", "norm"])
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    optimizer = torch.optim.AdamW(param_groups, lr=lr)
+
+    total_steps = n_epochs * len(train_loader)
+
+    # scheduler = StepLR(optimizer, step_size=30, gamma=0.2)
+    total_steps   = n_epochs * len(train_loader)
+    warmup_steps  = warmup_epochs * len(train_loader)
+
+    import math
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return float(step) / warmup_steps
+        return 0.5 * (1 + math.cos(math.pi * (step - warmup_steps) /
+                                    (total_steps - warmup_steps)))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     if precision == "mixed":
         scaler = GradScaler()
 
-    best_val_loss = float("inf")
-    for epoch in range(n_epochs):
+    writer = SummaryWriter(f"runs/{task_name}_{datetime.now():%Y%m%d_%H%M%S}")
+
+    global_step = 0
+    best_val = float("inf")
+
+    for epoch in range(1, n_epochs + 1):
         train_loss = 0.0
-        progress_bar = tqdm(train_dataloader, total=len(train_dataloader))
-        progress_bar.set_description("Training...")
-        for img_batch, gt_msk_batch in progress_bar:
-            img_batch = img_batch.to(device)
-            gt_msk_batch = gt_msk_batch.to(device)
+
+        for img, mask in tqdm(train_loader, desc=f"Epoch {epoch}/{n_epochs}"):
+            img, mask = img.to(device), mask.to(device)
             optimizer.zero_grad()
 
-            match precision:
-                case "full":
-                    pred_mask = model(img_batch)
-                    # breakpoint()
-                    loss = loss_fn(output_last_fn(pred_mask), gt_msk_batch)
-                    loss.backward()
-                    optimizer.step()
-                case "mixed":
-                    with autocast():
-                        pred_mask = model(img_batch)
+            if precision == "full":
+                preds = model(img)
+                loss = loss_fn(output_last_fn(preds), mask)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
 
-                        loss = loss_fn(output_last_fn(pred_mask), gt_msk_batch.long())
+            else:  # mixed
+                with autocast():
+                    preds = model(img)
+                    loss = loss_fn(output_last_fn(preds), mask.long())
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
 
+            # one step every batch
             train_loss += loss.item()
-            progress_bar.set_description(f"Loss: {loss.item():.4f}")
 
-        val_loss = validate(model, val_dataloader, output_last_fn, loss_fn)
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), base_model_weight_dir / f"{task_name}.pt")
-        print(
-            f"Epoch {epoch + 1} | TrainLoss:"
-            f" {train_loss / len(train_dataloader):.4f} "
-            f"| ValLoss: {val_loss:.4f}"
+            # log per‐batch metrics
+            writer.add_scalar("LR", optimizer.param_groups[0]["lr"], global_step)
+            writer.add_scalar("Loss/train_batch", loss.item(), global_step)
+            global_step += 1
+            scheduler.step()
+        
+        # end of epoch: validation
+        val_loss = validate(model, val_loader, output_last_fn, loss_fn)
+
+        avg_train = train_loss / len(train_loader)
+        # writer.add_scalar("Loss/train_epoch", avg_train, epoch)
+        # writer.add_scalar("Loss/val", val_loss, epoch)
+        writer.add_scalars(
+            "Loss",
+            {
+                "train_epoch": avg_train,
+                "val": val_loss,
+            },
+            epoch,
         )
+
+        # save best
+        if val_loss < best_val:
+            best_val = val_loss
+            torch.save(model.state_dict(), base_model_weight_dir / f"{task_name}.pt")
+
+        print(f"Epoch {epoch:02d}: train={avg_train:.4f}  val={val_loss:.4f}")
+
+    writer.close()
 
 
 class DiceLossModule(nn.Module):
@@ -132,7 +195,7 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument("--lr", help="Learning rate", default=1e-4, type=float)
-    parser.add_argument("--n_epochs", help="Number of epochs", default=5, type=int)
+    parser.add_argument("--n_epochs", help="Number of epochs", default=15, type=int)
     parser.add_argument("--batch_size", help="Batch size", default=8, type=int)
     parser.add_argument(
         "--pretrained_weights",
@@ -171,7 +234,7 @@ if __name__ == "__main__":
                     except Exception as e:
                         print(e)
                         continue
-        case "inner_embryo" | 'pronuclei':
+        case "inner_embryo" | "pronuclei":
             image_file_paths = sorted(
                 list((data_pth / "images").glob("*.jpg")), key=lambda x: x.stem
             )
@@ -181,8 +244,8 @@ if __name__ == "__main__":
             for img_path, msk_path in tqdm(
                 zip(image_file_paths, mask_file_paths), total=len(image_file_paths)
             ):
-                images.append(Image.open(img_path))
-                masks.append(Image.open(msk_path))
+                images.append(Image.open(img_path).copy())
+                masks.append(Image.open(msk_path).copy())
         case _:
             raise ValueError("Unsupported segmentation task provided.")
 
@@ -198,12 +261,15 @@ if __name__ == "__main__":
     # Initialize model and loss function
 
     model = smp.Unet(
-        encoder_name="resnet152",
-        encoder_weights="imagenet",
+        encoder_name="resnext101_32x16d",
+        encoder_weights="instagram",
         in_channels=3,
         classes=1,
     )
-    loss_fn = DiceLossModule()
+
+    from segmentation_models_pytorch.losses import DiceLoss
+
+    loss_fn = DiceLoss(mode="binary", from_logits=False)
 
     train(
         train_dataset=train_dataset,

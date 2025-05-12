@@ -29,7 +29,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
 
     val_dataset = ImageDataset(images=images, masks=images)
 
-    val_dataloader = DataLoader(val_dataset, batch_size=32)
+    val_dataloader = DataLoader(val_dataset, batch_size=64)
 
     model.eval()
     from torch.cuda.amp import autocast
@@ -70,15 +70,15 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
 if __name__ == "__main__":
 
     model = smp.Unet(
-        encoder_name="resnext101_32x48d",
+        encoder_name="resnext101_32x48d",  # "resnext101_32x48d",
         encoder_weights="instagram",
         in_channels=3,
-        classes=2,
+        classes=3,
     )
 
     model.load_state_dict(
         torch.load(
-            "/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/pronuclei.pt",
+            "/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/pronuclei_simple.pt",
             weights_only=True,
         )
     )
@@ -87,13 +87,13 @@ if __name__ == "__main__":
     model.to(DEVICE)
 
     path_timelapses = Path(
-        "/home/tsakalis/ntua/phd/cellforge/cellforge/data/raw_timelapses/"
+        "/media/tsakalis/STORAGE/phd/raw_timelapses/"
     )
 
     all_timelapses = list(path_timelapses.glob("*"))
     save_data_pth = Path('/media/tsakalis/STORAGE/phd/pronuclei_tracking')
 
-    for timelapse_pth in all_timelapses:
+    for timelapse_pth in tqdm(all_timelapses):
         slide_id = str(timelapse_pth).split("/")[-1]
         # print(slide_id)
 
@@ -104,13 +104,13 @@ if __name__ == "__main__":
 
 
             )
-
-            np.save(save_data_pth / f'masks/{slide_id}.npy',
-                    np.stack(upscaled_masks))
-
             
+            np.savez_compressed(save_data_pth / f'masks/{slide_id}.npz',
+                    all_masks=np.stack(upscaled_masks))
 
-            np.save(save_data_pth / f'metadata/accumulated_pn_area_{slide_id}.npy', np.array(pn_size))
+            # np.savez_compressed("stacked_compressed.npz", stacked=stacked)
+
+         
         except Exception as e:
             print(e)
             print(timelapse_pth)
