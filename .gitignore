@@ -173,3 +173,4 @@ cellforge/cellforge/simulation_experiments
 .DS_Store
 *.pt
 runs
+model_weights/
