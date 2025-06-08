@@ -174,3 +174,4 @@ cellforge/cellforge/simulation_experiments
 *.pt
 runs
 model_weights/
+*.csv

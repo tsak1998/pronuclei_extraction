@@ -7,7 +7,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 from PIL import Image
 import io
 
-base_slide_pth = Path('/media/tsakalis/STORAGE/synology/SynologyDrive/slides')
+base_slide_pth = Path('/media/tsakalis/STORAGE/synology/SynologyDrive/extra_slides')
 base_extracted_images_pth = Path('/media/tsakalis/STORAGE/phd/raw_timelapses')
 
 def save_image(image, image_path):
@@ -50,10 +50,10 @@ def load_images_from_db(slide_id: str) -> None:
 if __name__ == '__main__':
     all_slide_ids = [slide.stem for slide in base_slide_pth.glob('*')][::-1]
 
-    last_idx = all_slide_ids.index('D2014.11.21_S0891_I149')
+    # last_idx = all_slide_ids.index('D2014.11.21_S0891_I149')/
 
     
     print(f"Total slides to process: {len(all_slide_ids)}", flush=True)
     # Process each slide sequentially.
-    for slide_id in tqdm(all_slide_ids[last_idx:], desc="Processing slides"):
+    for slide_id in tqdm(all_slide_ids, desc="Processing slides"):
         load_images_from_db(slide_id)

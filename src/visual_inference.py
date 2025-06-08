@@ -131,8 +131,8 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
 
             pred_mask = model(inpt_images.to(device))
             #
-            # masks = torch.softmax(pred_mask,axis=1).cpu().numpy()>0.05
-            masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.05
+            masks = torch.softmax(pred_mask,axis=1).cpu().numpy()>0.05
+            # masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.05
 
             
             all_masks.extend([msk for msk in masks])
@@ -192,7 +192,7 @@ if __name__ == "__main__":
 
 
     type_of_problem = "multilabel"
-    model_name = "multilabel_dpt-vit_base_patch16_224.augreg_in21k_3_classes_SEPARATE_MASK_FINAL"#"multiclass_u-mit_b5"
+    model_name = "multiclass_dpt-vit_base_patch16_224.augreg_in21k_3_classes_WHOLE_SINGLE_MASK_FINAL2"#"multiclass_ub5"-mit_
     # f"{type_of_problem}_{model_pronuclei.__dict__['name']}",
     model_pronuclei.load_state_dict(
         torch.load(
