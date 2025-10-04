@@ -175,3 +175,4 @@ cellforge/cellforge/simulation_experiments
 runs
 model_weights/
 *.csv
+*.parquet
