@@ -520,7 +520,9 @@ if __name__ == "__main__":
             whole_emb_all.append(whole_emb)
 
         except Exception as e:
+            print(e)
             print(row)
+            break
 
     full_pn1_df = pd.concat(pn1_features_all).reset_index(drop=True)
     full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
