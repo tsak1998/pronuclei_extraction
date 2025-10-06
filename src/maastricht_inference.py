@@ -24,8 +24,8 @@ from pathlib import Path
 import pandas as pd
 
 
-device = "cuda"
-
+device = "cuda" if torch.cuda.is_available() else "cpu"
+ 
 import numpy as np
 import cv2
 from skimage.measure import label, regionprops
