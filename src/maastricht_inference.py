@@ -495,36 +495,36 @@ if __name__ == "__main__":
     
     for _, row in slide_info_df.iterrows():
         
-        try: 
-            sample_pth= data_path/f"videoframe/{row['embryoID']}"
+        # try: 
+        sample_pth= data_path/f"videoframe/{row['embryoID']}"
 
-            print(sample_pth)
+        print(sample_pth)
 
-            slide_images, slide_masks, sample_id, image_filenames = inference_whole_slide(
-                model_pronuclei, sample_pth, args.max_frames
-            )
+        slide_images, slide_masks, sample_id, image_filenames = inference_whole_slide(
+            model_pronuclei, sample_pth, args.max_frames
+        )
 
-            pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
-            pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
-            
-            whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
+        pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
+        pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
+        
+        whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
 
-            pn1_features['embryo_id'] = row['embryoID']
-            pn2_features['embryo_id'] = row['embryoID']
-            whole_emb['embryo_id'] = row['embryoID']
+        pn1_features['embryo_id'] = row['embryoID']
+        pn2_features['embryo_id'] = row['embryoID']
+        whole_emb['embryo_id'] = row['embryoID']
 
-            pn1_features['y'] = row['abnormality']
-            pn2_features['y'] = row['abnormality']
-            whole_emb['y'] = row['abnormality']
-            
-            pn1_features_all.append(pn1_features)
-            pn2_features_all.append(pn2_features)
-            whole_emb_all.append(whole_emb)
+        pn1_features['y'] = row['abnormality']
+        pn2_features['y'] = row['abnormality']
+        whole_emb['y'] = row['abnormality']
+        
+        pn1_features_all.append(pn1_features)
+        pn2_features_all.append(pn2_features)
+        whole_emb_all.append(whole_emb)
 
-        except Exception as e:
-            print(e)
-            print(row)
-            break
+        # except Exception as e:
+        #     print(e)
+        #     print(row)
+        #     break
 
     full_pn1_df = pd.concat(pn1_features_all).reset_index(drop=True)
     full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
