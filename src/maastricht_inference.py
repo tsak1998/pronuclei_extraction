@@ -410,7 +410,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
         # image_ar[1, upscaled_mask2.astype(bool)] = 1
         # image_ar[2, upscaled_mask3.astype(bool)] = 1
 
-        final_images.append(Image.fromarray(image_ar.transpose(1, 2, 0)))
+        # final_images.append(Image.fromarray(image_ar.transpose(1, 2, 0)))
 
     return (
         final_images,
