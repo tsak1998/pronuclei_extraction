@@ -530,7 +530,7 @@ class ImageCircleDatasetV2(data.Dataset):
         # we’ll stack: [pn1_circle, pn2_circle, whole_embryo_mask, pn_model_mask]
         self.tf = A.Compose([
                 A.Rotate(limit=90, p=0.5),
-                A.ElasticTransform(p=0.2, alpha=1, sigma=50, alpha_affine=50),
+                A.ElasticTransform(p=0.2, alpha=1, sigma=50),
                 A.Resize(self.image_size, self.image_size),
                 ],
             additional_targets={

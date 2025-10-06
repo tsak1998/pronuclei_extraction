@@ -458,13 +458,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="data/extracted_signals",
+        default="home/pantelis/pronuclei_extraction/extracted_data/",
         help="Directory to save output videos",
     )
     parser.add_argument(
         "--max_frames",
         type=int,
-        default=200,
+        default=230,
         help="Maximum number of frames to process per sample",
     )
 
@@ -548,6 +548,7 @@ if __name__ == "__main__":
         pn2_features_all.append(pn2_features)
         whole_emb_all.append(whole_emb)
 
+        break
         # except Exception as e:
         #     print(e)
         #     print(row)
