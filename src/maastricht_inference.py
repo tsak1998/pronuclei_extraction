@@ -351,7 +351,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
     # Get sample ID from the path
     sample_id = slide_pth.name
 
-    image_file_paths = sorted(list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem))[
+    image_file_paths = sorted(list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem.split('frame')[1]))[
         :max_frame
     ]
 
