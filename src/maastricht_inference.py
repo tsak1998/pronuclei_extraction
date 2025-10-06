@@ -1,5 +1,7 @@
 import os
 
+from concurrent.futures import ProcessPoolExecutor
+
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from pathlib import Path
@@ -25,7 +27,7 @@ import pandas as pd
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
- 
+
 import numpy as np
 import cv2
 from skimage.measure import label, regionprops
@@ -34,6 +36,7 @@ from skimage.feature import graycomatrix, graycoprops
 from scipy.stats import skew, kurtosis
 
 AVERAGE_TIMESTEP = 1.0  # or whatever your dt is
+
 
 def extract_shape_geometry_features(img: np.ndarray):
     """
@@ -73,31 +76,31 @@ def extract_shape_geometry_features(img: np.ndarray):
     # If no blobs at all, return a dict full of Nones
     if not props:
         return {
-            'centroid_row': None,
-            'centroid_col': None,
-            'area': None,
-            'filled_area': None,
-            'perimeter': None,
-            'bbox': None,
-            'bounding_box_area': None,
-            'extent': None,
-            'aspect_ratio': None,
-            'equivalent_diameter': None,
-            'major_axis_length': None,
-            'minor_axis_length': None,
-            'orientation': None,
-            'convex_area': None,
-            'convex_hull': None,
-            'convex_perimeter': None,
-            'solidity': None,
-            'eccentricity': None,
-            'euler_number': None,
-            'circularity': None,
-            'feret_diameter_max': None,
-            'hu_moments': None,
-            'skeleton_length': None,
-            'endpoints': None,
-            'dt': AVERAGE_TIMESTEP
+            "centroid_row": None,
+            "centroid_col": None,
+            "area": None,
+            "filled_area": None,
+            "perimeter": None,
+            "bbox": None,
+            "bounding_box_area": None,
+            "extent": None,
+            "aspect_ratio": None,
+            "equivalent_diameter": None,
+            "major_axis_length": None,
+            "minor_axis_length": None,
+            "orientation": None,
+            "convex_area": None,
+            "convex_hull": None,
+            "convex_perimeter": None,
+            "solidity": None,
+            "eccentricity": None,
+            "euler_number": None,
+            "circularity": None,
+            "feret_diameter_max": None,
+            "hu_moments": None,
+            "skeleton_length": None,
+            "endpoints": None,
+            "dt": AVERAGE_TIMESTEP,
         }
 
     # Find the largest region by area (in case of multiple small blobs)
@@ -106,31 +109,31 @@ def extract_shape_geometry_features(img: np.ndarray):
     # If the largest blob is too small, treat as "no meaningful region"
     if region.area < 5:
         return {
-            'centroid_row': None,
-            'centroid_col': None,
-            'area': None,
-            'filled_area': None,
-            'perimeter': None,
-            'bbox': None,
-            'bounding_box_area': None,
-            'extent': None,
-            'aspect_ratio': None,
-            'equivalent_diameter': None,
-            'major_axis_length': None,
-            'minor_axis_length': None,
-            'orientation': None,
-            'convex_area': None,
-            'convex_hull': None,
-            'convex_perimeter': None,
-            'solidity': None,
-            'eccentricity': None,
-            'euler_number': None,
-            'circularity': None,
-            'feret_diameter_max': None,
-            'hu_moments': None,
-            'skeleton_length': None,
-            'endpoints': None,
-            'dt': AVERAGE_TIMESTEP
+            "centroid_row": None,
+            "centroid_col": None,
+            "area": None,
+            "filled_area": None,
+            "perimeter": None,
+            "bbox": None,
+            "bounding_box_area": None,
+            "extent": None,
+            "aspect_ratio": None,
+            "equivalent_diameter": None,
+            "major_axis_length": None,
+            "minor_axis_length": None,
+            "orientation": None,
+            "convex_area": None,
+            "convex_hull": None,
+            "convex_perimeter": None,
+            "solidity": None,
+            "eccentricity": None,
+            "euler_number": None,
+            "circularity": None,
+            "feret_diameter_max": None,
+            "hu_moments": None,
+            "skeleton_length": None,
+            "endpoints": None,
+            "dt": AVERAGE_TIMESTEP,
         }
 
     # Basic shape features from regionprops
@@ -153,7 +156,7 @@ def extract_shape_geometry_features(img: np.ndarray):
     euler_number = region.euler_number
 
     # Circularity: 4*pi*area / (perimeter^2)
-    circularity = (4 * np.pi * area / (perimeter ** 2)) if perimeter > 0 else np.nan
+    circularity = (4 * np.pi * area / (perimeter**2)) if perimeter > 0 else np.nan
 
     # Convex hull coords via OpenCV (to compute convex perimeter and Feret diameter)
     mask = region.image.astype(np.uint8)  # region-local mask
@@ -161,17 +164,18 @@ def extract_shape_geometry_features(img: np.ndarray):
     hull = cv2.convexHull(cnts[0])
     hull_pts = hull.squeeze()
     # Convert to global coordinates
-    hull_global = np.column_stack([
-        hull_pts[:, 1] + minr,  # row
-        hull_pts[:, 0] + minc   # col
-    ])
+    hull_global = np.column_stack(
+        [hull_pts[:, 1] + minr, hull_pts[:, 0] + minc]  # row  # col
+    )
     # Convex perimeter (length of hull contour)
     convex_perimeter = cv2.arcLength(hull, True)
     # Compute maximum caliper distance (Feret diameter) from hull points
     # Brute‐force: pairwise distances
     if hull_pts.ndim == 2 and hull_pts.shape[0] > 1:
         # hull_pts are local coords [ [col, row], … ]
-        pts = hull_pts[:, ::-1]  # convert to (row, col) if needed, but distances same regardless of ordering
+        pts = hull_pts[
+            :, ::-1
+        ]  # convert to (row, col) if needed, but distances same regardless of ordering
         dists = np.sqrt(((pts[:, None, :] - pts[None, :, :]) ** 2).sum(axis=2))
         feret_diameter_max = np.nanmax(dists)
     else:
@@ -191,49 +195,53 @@ def extract_shape_geometry_features(img: np.ndarray):
 
     # Count endpoints: pixels in skeleton with only one neighbor
     # Compute neighbor count via convolution
-    kernel = np.array([[1, 1, 1],
-                       [1, 10, 1],
-                       [1, 1, 1]])
-    neighbor_map = ndi.convolve(skeleton.astype(np.uint8), np.ones((3, 3)), mode='constant', cval=0)
+    kernel = np.array([[1, 1, 1], [1, 10, 1], [1, 1, 1]])
+    neighbor_map = ndi.convolve(
+        skeleton.astype(np.uint8), np.ones((3, 3)), mode="constant", cval=0
+    )
     # For each skeleton pixel, count adjacent skeleton pixels
     endpoints = 0
     for (r, c), val in np.ndenumerate(skeleton):
         if val:
             # Count neighbors in 8‐connectivity
-            nbr_count = np.sum(skeleton[max(r-1, 0):r+2, max(c-1, 0):c+2]) - 1
+            nbr_count = (
+                np.sum(skeleton[max(r - 1, 0) : r + 2, max(c - 1, 0) : c + 2]) - 1
+            )
             if nbr_count == 1:
                 endpoints += 1
 
     return {
-        'centroid_row': float(region.centroid[0]),
-        'centroid_col': float(region.centroid[1]),
-        'area': area,
-        'filled_area': filled_area,
-        'perimeter': perimeter,
-        'bbox': (minr, minc, maxr, maxc),
-        'bounding_box_area': bbox_area,
-        'extent': extent,
-        'aspect_ratio': aspect_ratio,
-        'equivalent_diameter': equiv_diameter,
-        'major_axis_length': major_axis_length,
-        'minor_axis_length': minor_axis_length,
-        'orientation': orientation,
-        'convex_area': convex_area,
-        'convex_hull': hull_global,        # Nx2 array of (row, col)
-        'convex_perimeter': convex_perimeter,
-        'solidity': solidity,
-        'eccentricity': eccentricity,
-        'euler_number': euler_number,
-        'circularity': circularity,
-        'feret_diameter_max': feret_diameter_max,
-        'hu_moments': hu,                  # length-7 array
-        'skeleton_length': skeleton_length,
-        'endpoints': endpoints,
-        'dt': AVERAGE_TIMESTEP
+        "centroid_row": float(region.centroid[0]),
+        "centroid_col": float(region.centroid[1]),
+        "area": area,
+        "filled_area": filled_area,
+        "perimeter": perimeter,
+        "bbox": (minr, minc, maxr, maxc),
+        "bounding_box_area": bbox_area,
+        "extent": extent,
+        "aspect_ratio": aspect_ratio,
+        "equivalent_diameter": equiv_diameter,
+        "major_axis_length": major_axis_length,
+        "minor_axis_length": minor_axis_length,
+        "orientation": orientation,
+        "convex_area": convex_area,
+        "convex_hull": hull_global,  # Nx2 array of (row, col)
+        "convex_perimeter": convex_perimeter,
+        "solidity": solidity,
+        "eccentricity": eccentricity,
+        "euler_number": euler_number,
+        "circularity": circularity,
+        "feret_diameter_max": feret_diameter_max,
+        "hu_moments": hu,  # length-7 array
+        "skeleton_length": skeleton_length,
+        "endpoints": endpoints,
+        "dt": AVERAGE_TIMESTEP,
     }
 
 
-def extract_intensity_features(gray_img: np.ndarray, mask: np.ndarray, distances=[1], angles=[0]):
+def extract_intensity_features(
+    gray_img: np.ndarray, mask: np.ndarray, distances=[1], angles=[0]
+):
     """
     Given a 2D grayscale image and a binary mask (same dimensions), compute
     intensity-based features over the region where mask>0. Returns:
@@ -254,25 +262,25 @@ def extract_intensity_features(gray_img: np.ndarray, mask: np.ndarray, distances
     pixels = gray_img[mask > 0].ravel().astype(np.float64)
     if pixels.size == 0:
         return {
-            'mean_intensity': None,
-            'median_intensity': None,
-            'std_intensity': None,
-            'min_intensity': None,
-            'max_intensity': None,
-            'skewness': None,
-            'kurtosis': None,
-            'entropy': None,
-            'percentile_10': None,
-            'percentile_25': None,
-            'percentile_75': None,
-            'percentile_90': None,
-            'glcm_contrast': None,
-            'glcm_dissimilarity': None,
-            'glcm_homogeneity': None,
-            'glcm_ASM': None,
-            'glcm_energy': None,
-            'glcm_correlation': None,
-            'dt': None
+            "mean_intensity": None,
+            "median_intensity": None,
+            "std_intensity": None,
+            "min_intensity": None,
+            "max_intensity": None,
+            "skewness": None,
+            "kurtosis": None,
+            "entropy": None,
+            "percentile_10": None,
+            "percentile_25": None,
+            "percentile_75": None,
+            "percentile_90": None,
+            "glcm_contrast": None,
+            "glcm_dissimilarity": None,
+            "glcm_homogeneity": None,
+            "glcm_ASM": None,
+            "glcm_energy": None,
+            "glcm_correlation": None,
+            "dt": None,
         }
 
     # Basic statistics
@@ -300,8 +308,8 @@ def extract_intensity_features(gray_img: np.ndarray, mask: np.ndarray, distances
     coords = np.column_stack(np.where(mask > 0))
     minr, minc = coords.min(axis=0)
     maxr, maxc = coords.max(axis=0)
-    roi = gray_img[minr:maxr+1, minc:maxc+1]
-    roi_mask = mask[minr:maxr+1, minc:maxc+1]
+    roi = gray_img[minr : maxr + 1, minc : maxc + 1]
+    roi_mask = mask[minr : maxr + 1, minc : maxc + 1]
 
     # Quantize ROI to 8 gray levels (0–7)
     roi_quant = np.floor(roi / 32).astype(np.uint8)
@@ -313,48 +321,46 @@ def extract_intensity_features(gray_img: np.ndarray, mask: np.ndarray, distances
         angles=angles,
         levels=8,
         symmetric=True,
-        normed=True
+        normed=True,
     )
 
-    contrast = float(np.mean(graycoprops(glcm, 'contrast')))
-    dissimilarity = float(np.mean(graycoprops(glcm, 'dissimilarity')))
-    homogeneity = float(np.mean(graycoprops(glcm, 'homogeneity')))
-    ASM = float(np.mean(graycoprops(glcm, 'ASM')))
-    energy = float(np.mean(graycoprops(glcm, 'energy')))
-    correlation = float(np.mean(graycoprops(glcm, 'correlation')))
+    contrast = float(np.mean(graycoprops(glcm, "contrast")))
+    dissimilarity = float(np.mean(graycoprops(glcm, "dissimilarity")))
+    homogeneity = float(np.mean(graycoprops(glcm, "homogeneity")))
+    ASM = float(np.mean(graycoprops(glcm, "ASM")))
+    energy = float(np.mean(graycoprops(glcm, "energy")))
+    correlation = float(np.mean(graycoprops(glcm, "correlation")))
 
     return {
-        'mean_intensity': mean_intensity,
-        'median_intensity': median_intensity,
-        'std_intensity': std_intensity,
-        'min_intensity': min_intensity,
-        'max_intensity': max_intensity,
-        'skewness': skewness,
-        'kurtosis': kurt,
-        'entropy': entropy,
-        'percentile_10': p10,
-        'percentile_25': p25,
-        'percentile_75': p75,
-        'percentile_90': p90,
-        'glcm_contrast': contrast,
-        'glcm_dissimilarity': dissimilarity,
-        'glcm_homogeneity': homogeneity,
-        'glcm_ASM': ASM,
-        'glcm_energy': energy,
-        'glcm_correlation': correlation,
-        'dt': AVERAGE_TIMESTEP
+        "mean_intensity": mean_intensity,
+        "median_intensity": median_intensity,
+        "std_intensity": std_intensity,
+        "min_intensity": min_intensity,
+        "max_intensity": max_intensity,
+        "skewness": skewness,
+        "kurtosis": kurt,
+        "entropy": entropy,
+        "percentile_10": p10,
+        "percentile_25": p25,
+        "percentile_75": p75,
+        "percentile_90": p90,
+        "glcm_contrast": contrast,
+        "glcm_dissimilarity": dissimilarity,
+        "glcm_homogeneity": homogeneity,
+        "glcm_ASM": ASM,
+        "glcm_energy": energy,
+        "glcm_correlation": correlation,
+        "dt": AVERAGE_TIMESTEP,
     }
-
 
 
 def inference_whole_slide(model, slide_pth: Path, max_frame: int):
     # Get sample ID from the path
     sample_id = slide_pth.name
 
-    image_file_paths = sorted(list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem.split('frame')[1]))[
-        :max_frame
-    ]
-
+    image_file_paths = sorted(
+        list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem.split("frame")[1])
+    )[:max_frame]
 
     images = [Image.open(img_path) for img_path in image_file_paths]
     # Store original filenames for later use when saving masks
@@ -377,7 +383,6 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
             # masks = torch.softmax(pred_mask,axis=1).cpu().numpy()>0.5
             masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.05
 
-            
             all_masks.extend([msk for msk in masks])
             # breakpoint()
 
@@ -420,6 +425,15 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
     )
 
 
+def extract_all(msk_triplet):
+    pn1 = extract_shape_geometry_features(msk_triplet[0])
+    pn2 = extract_shape_geometry_features(msk_triplet[1])
+    whole = extract_shape_geometry_features(msk_triplet[2])
+    return pn1, pn2, whole  # dicts/Series preferred
+
+
+def to_df(records):
+    return pd.DataFrame.from_records(records)
 
 
 if __name__ == "__main__":
@@ -427,25 +441,34 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Pronuclei inference on embryo images")
-    parser.add_argument("--model_weights", type=str,
-                         default="/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/multilabel_dpt-vit_base_patch16_224.augreg_in21k_3_classes_SEPARATE_MASK_FINAL.pt",
-                        help="Path to model weights file")
+    parser.add_argument(
+        "--model_weights",
+        type=str,
+        default="/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/multilabel_dpt-vit_base_patch16_224.augreg_in21k_3_classes_SEPARATE_MASK_FINAL.pt",
+        help="Path to model weights file",
+    )
 
-    parser.add_argument("--data_path", type=str,
-                        default="/home/tsakalis/ntua/phd/maastricht/pronuclei_extraction/data",
-                        help="Primary path to look for samples")
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="/home/tsakalis/ntua/phd/maastricht/pronuclei_extraction/data",
+        help="Primary path to look for samples",
+    )
 
-    parser.add_argument("--output_dir", type=str, default="data/extracted_signals",
-                        help="Directory to save output videos")
-    parser.add_argument("--max_frames", type=int, default=200,
-                        help="Maximum number of frames to process per sample")
-    
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="data/extracted_signals",
+        help="Directory to save output videos",
+    )
+    parser.add_argument(
+        "--max_frames",
+        type=int,
+        default=200,
+        help="Maximum number of frames to process per sample",
+    )
+
     args = parser.parse_args()
-    
-
-    
-
-
 
     # Create the directory for saving masks
     output_dir = Path(args.output_dir)
@@ -464,20 +487,15 @@ if __name__ == "__main__":
     #     classes=4,
     # )
 
-
     type_of_problem = "multilabel"
 
-    
     data_path = Path(args.data_path)
 
-    slide_info_df = pd.read_csv(data_path/"embryo_video_abnormality_202509.csv")
-
+    slide_info_df = pd.read_csv(data_path / "embryo_video_abnormality_202509.csv")
 
     model_pronuclei.load_state_dict(
         torch.load(
-            args.model_weights,
-            weights_only=True,
-            map_location=torch.device(device)
+            args.model_weights, weights_only=True, map_location=torch.device(device)
         )
     )
     model_pronuclei.eval()
@@ -485,18 +503,18 @@ if __name__ == "__main__":
     model_pronuclei.to(device)
 
     all_pn_areas = []
-    
-    pn1_features_all =[]
+
+    pn1_features_all = []
     pn2_features_all = []
 
     # pn1_features_intens =[]
     # pn2_features_intens = []
     whole_emb_all = []
-    
+
     for _, row in slide_info_df.iterrows():
-        
-        # try: 
-        sample_pth= data_path/f"videoframe/{row['embryoID']}"
+
+        # try:
+        sample_pth = data_path / f"videoframe/{row['embryoID']}"
 
         print(sample_pth)
 
@@ -504,19 +522,28 @@ if __name__ == "__main__":
             model_pronuclei, sample_pth, args.max_frames
         )
 
-        pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
-        pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
-        
-        whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
+        n_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 4))
+        chunksize = max(1, len(slide_masks) // (n_workers * 4))
 
-        pn1_features['embryo_id'] = row['embryoID']
-        pn2_features['embryo_id'] = row['embryoID']
-        whole_emb['embryo_id'] = row['embryoID']
+        # pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
+        # pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
 
-        pn1_features['y'] = row['abnormality']
-        pn2_features['y'] = row['abnormality']
-        whole_emb['y'] = row['abnormality']
-        
+        # whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
+        with ProcessPoolExecutor(max_workers=n_workers) as ex:
+            results = list(ex.map(extract_all, slide_masks, chunksize=chunksize))
+
+        pn1_features = to_df([r[0] for r in results])
+        pn2_features = to_df([r[1] for r in results])
+        whole_emb = to_df([r[2] for r in results])
+
+        pn1_features["embryo_id"] = row["embryoID"]
+        pn2_features["embryo_id"] = row["embryoID"]
+        whole_emb["embryo_id"] = row["embryoID"]
+
+        pn1_features["y"] = row["abnormality"]
+        pn2_features["y"] = row["abnormality"]
+        whole_emb["y"] = row["abnormality"]
+
         pn1_features_all.append(pn1_features)
         pn2_features_all.append(pn2_features)
         whole_emb_all.append(whole_emb)
@@ -530,9 +557,6 @@ if __name__ == "__main__":
     full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
     full_emb_df = pd.concat(whole_emb_all).reset_index(drop=True)
 
-    full_pn1_df.to_csv(output_dir/'full_pn1_df.csv',index=False)
-    full_pn2_df.to_csv(output_dir/'full_pn2_df.csv',index=False)
-    full_emb_df.to_csv(output_dir/'full_emb_df.csv',index=False)
-    
-
-    
+    full_pn1_df.to_csv(output_dir / "full_pn1_df.csv", index=False)
+    full_pn2_df.to_csv(output_dir / "full_pn2_df.csv", index=False)
+    full_emb_df.to_csv(output_dir / "full_emb_df.csv", index=False)
