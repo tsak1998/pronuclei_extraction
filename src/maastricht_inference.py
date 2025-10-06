@@ -458,7 +458,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="home/pantelis/pronuclei_extraction/extracted_data/",
+        default="home/pantelis/pronuclei_extraction/extracted_data",
         help="Directory to save output videos",
     )
     parser.add_argument(
@@ -472,7 +472,7 @@ if __name__ == "__main__":
 
     # Create the directory for saving masks
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # output_dir.mkdir(parents=True, exist_ok=True)
 
     model_pronuclei = smp.DPT(
         encoder_name="tu-vit_base_patch16_224.augreg_in21k",
@@ -513,46 +513,47 @@ if __name__ == "__main__":
 
     for _, row in tqdm(slide_info_df.iterrows()):
 
-        # try:
-        sample_pth = data_path / f"videoframe/{row['embryoID']}"
+        try:
+            sample_pth = data_path / f"videoframe/{row['embryoID']}"
 
-        print(sample_pth)
+            print(sample_pth)
 
-        slide_images, slide_masks, sample_id, image_filenames = inference_whole_slide(
-            model_pronuclei, sample_pth, args.max_frames
-        )
+            slide_images, slide_masks, sample_id, image_filenames = (
+                inference_whole_slide(model_pronuclei, sample_pth, args.max_frames)
+            )
 
-        n_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()//4 or 4))
-        chunksize = max(1, len(slide_masks) // (n_workers * 4))
+            n_workers = int(
+                os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() // 4 or 4)
+            )
+            chunksize = max(1, len(slide_masks) // (n_workers * 4))
 
-        # pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
-        # pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
+            # pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
+            # pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
 
-        # whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
-        with ProcessPoolExecutor(max_workers=n_workers) as ex:
-            results = list(ex.map(extract_all, slide_masks, chunksize=chunksize))
+            # whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
+            with ProcessPoolExecutor(max_workers=n_workers) as ex:
+                results = list(ex.map(extract_all, slide_masks, chunksize=chunksize))
 
-        pn1_features = to_df([r[0] for r in results])
-        pn2_features = to_df([r[1] for r in results])
-        whole_emb = to_df([r[2] for r in results])
+            pn1_features = to_df([r[0] for r in results])
+            pn2_features = to_df([r[1] for r in results])
+            whole_emb = to_df([r[2] for r in results])
 
-        pn1_features["embryo_id"] = row["embryoID"]
-        pn2_features["embryo_id"] = row["embryoID"]
-        whole_emb["embryo_id"] = row["embryoID"]
+            pn1_features["embryo_id"] = row["embryoID"]
+            pn2_features["embryo_id"] = row["embryoID"]
+            whole_emb["embryo_id"] = row["embryoID"]
 
-        pn1_features["y"] = row["abnormality"]
-        pn2_features["y"] = row["abnormality"]
-        whole_emb["y"] = row["abnormality"]
+            pn1_features["y"] = row["abnormality"]
+            pn2_features["y"] = row["abnormality"]
+            whole_emb["y"] = row["abnormality"]
 
-        pn1_features_all.append(pn1_features)
-        pn2_features_all.append(pn2_features)
-        whole_emb_all.append(whole_emb)
+            pn1_features_all.append(pn1_features)
+            pn2_features_all.append(pn2_features)
+            whole_emb_all.append(whole_emb)
 
-        break
-        # except Exception as e:
-        #     print(e)
-        #     print(row)
-        #     break
+        except Exception as e:
+            print(e)
+            print(row)
+            break
 
     full_pn1_df = pd.concat(pn1_features_all).reset_index(drop=True)
     full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
