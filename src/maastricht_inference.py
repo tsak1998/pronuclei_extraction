@@ -374,7 +374,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
     from torch.cuda.amp import autocast
 
     all_masks = []
-    for inpt_images, _ in tqdm(val_dataloader):
+    for inpt_images, _ in val_dataloader:
         with torch.no_grad():
             # with autocast():
 
@@ -511,7 +511,7 @@ if __name__ == "__main__":
     # pn2_features_intens = []
     whole_emb_all = []
 
-    for _, row in slide_info_df.iterrows():
+    for _, row in tqdm(slide_info_df.iterrows()):
 
         # try:
         sample_pth = data_path / f"videoframe/{row['embryoID']}"
@@ -522,7 +522,7 @@ if __name__ == "__main__":
             model_pronuclei, sample_pth, args.max_frames
         )
 
-        n_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 4))
+        n_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count()//4 or 4))
         chunksize = max(1, len(slide_masks) // (n_workers * 4))
 
         # pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
