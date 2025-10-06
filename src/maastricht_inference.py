@@ -404,8 +404,8 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
 
         upscaled_masks.append((upscaled_mask1, upscaled_mask2, upscaled_mask3))
         image_pn_isolated = image_ar.copy()
-        image_pn_isolated[:, ~upscaled_mask1.astype(bool)] = 0
-        isolated_pns.append(image_pn_isolated.transpose(1, 2, 0))
+        # image_pn_isolated[:, ~upscaled_mask1.astype(bool)] = 0
+        # isolated_pns.append(image_pn_isolated.transpose(1, 2, 0))
         image_ar[0, upscaled_mask1.astype(bool)] = 1
         image_ar[1, upscaled_mask2.astype(bool)] = 1
         # image_ar[2, upscaled_mask3.astype(bool)] = 1
