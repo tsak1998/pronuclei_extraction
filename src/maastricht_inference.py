@@ -477,6 +477,7 @@ if __name__ == "__main__":
         torch.load(
             args.model_weights,
             weights_only=True,
+            map_location=torch.device(device)
         )
     )
     model_pronuclei.eval()
