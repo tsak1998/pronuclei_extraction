@@ -232,117 +232,144 @@ def extract_shape_geometry_features(img: np.ndarray):
         'dt': AVERAGE_TIMESTEP
     }
 
+import numpy as np
+import cv2
+from skimage.measure import regionprops, label, perimeter as sk_perimeter
+from skimage.morphology import skeletonize
+from scipy import ndimage as ndi
 
-def extract_intensity_features(gray_img: np.ndarray, mask: np.ndarray, distances=[1], angles=[0]):
-    """
-    Given a 2D grayscale image and a binary mask (same dimensions), compute
-    intensity-based features over the region where mask>0. Returns:
-      - mean_intensity
-      - median_intensity
-      - std_intensity
-      - min_intensity
-      - max_intensity
-      - skewness
-      - kurtosis
-      - entropy (Shannon)
-      - percentiles (10th, 25th, 75th, 90th)
-      - GLCM texture features: contrast, dissimilarity, homogeneity, ASM, energy, correlation
-        (averaged over specified distances and angles)
-      - dt (not meaningful here, but kept for consistency)
-    """
-    # Extract pixel values under mask
-    pixels = gray_img[mask > 0].ravel().astype(np.float64)
-    if pixels.size == 0:
+# cache small constants once
+_NEIGHBOR_KERNEL = np.ones((3, 3), dtype=np.uint8)
+
+def extract_shape_geometry_features(img: np.ndarray):
+    binary = img > 0
+    if not np.any(binary):
         return {
-            'mean_intensity': None,
-            'median_intensity': None,
-            'std_intensity': None,
-            'min_intensity': None,
-            'max_intensity': None,
-            'skewness': None,
-            'kurtosis': None,
-            'entropy': None,
-            'percentile_10': None,
-            'percentile_25': None,
-            'percentile_75': None,
-            'percentile_90': None,
-            'glcm_contrast': None,
-            'glcm_dissimilarity': None,
-            'glcm_homogeneity': None,
-            'glcm_ASM': None,
-            'glcm_energy': None,
-            'glcm_correlation': None,
-            'dt': None
+            'centroid_row': None, 'centroid_col': None, 'area': None, 'filled_area': None,
+            'perimeter': None, 'bbox': None, 'bounding_box_area': None, 'extent': None,
+            'aspect_ratio': None, 'equivalent_diameter': None, 'major_axis_length': None,
+            'minor_axis_length': None, 'orientation': None, 'convex_area': None,
+            'convex_hull': None, 'convex_perimeter': None, 'solidity': None,
+            'eccentricity': None, 'euler_number': None, 'circularity': None,
+            'feret_diameter_max': None, 'hu_moments': None, 'skeleton_length': None,
+            'endpoints': None, 'dt': AVERAGE_TIMESTEP
         }
 
-    # Basic statistics
-    mean_intensity = float(np.mean(pixels))
-    median_intensity = float(np.median(pixels))
-    std_intensity = float(np.std(pixels))
-    min_intensity = float(np.min(pixels))
-    max_intensity = float(np.max(pixels))
-    skewness = float(skew(pixels))
-    kurt = float(kurtosis(pixels))
+    # label once, take largest component only
+    labeled = label(binary, connectivity=2)
+    # fast argmax by bincount (skip background 0)
+    areas = np.bincount(labeled.ravel())
+    if areas.size <= 1:
+        return {
+            'centroid_row': None, 'centroid_col': None, 'area': None, 'filled_area': None,
+            'perimeter': None, 'bbox': None, 'bounding_box_area': None, 'extent': None,
+            'aspect_ratio': None, 'equivalent_diameter': None, 'major_axis_length': None,
+            'minor_axis_length': None, 'orientation': None, 'convex_area': None,
+            'convex_hull': None, 'convex_perimeter': None, 'solidity': None,
+            'eccentricity': None, 'euler_number': None, 'circularity': None,
+            'feret_diameter_max': None, 'hu_moments': None, 'skeleton_length': None,
+            'endpoints': None, 'dt': AVERAGE_TIMESTEP
+        }
+    label_id = np.argmax(areas[1:]) + 1
+    mask = (labeled == label_id)
 
-    # Shannon entropy over pixel histogram (256 bins)
-    hist, _ = np.histogram(pixels, bins=256, range=(0, 255), density=True)
-    # avoid log(0) by masking
-    hist_nonzero = hist[hist > 0]
-    entropy = float(-np.sum(hist_nonzero * np.log2(hist_nonzero)))
+    # regionprops on the single mask (small array)
+    props = regionprops(mask.astype(np.uint8))[0]
+    if props.area < 5:
+        return {
+            'centroid_row': None, 'centroid_col': None, 'area': None, 'filled_area': None,
+            'perimeter': None, 'bbox': None, 'bounding_box_area': None, 'extent': None,
+            'aspect_ratio': None, 'equivalent_diameter': None, 'major_axis_length': None,
+            'minor_axis_length': None, 'orientation': None, 'convex_area': None,
+            'convex_hull': None, 'convex_perimeter': None, 'solidity': None,
+            'eccentricity': None, 'euler_number': None, 'circularity': None,
+            'feret_diameter_max': None, 'hu_moments': None, 'skeleton_length': None,
+            'endpoints': None, 'dt': AVERAGE_TIMESTEP
+        }
 
-    # Percentiles
-    p10 = float(np.percentile(pixels, 10))
-    p25 = float(np.percentile(pixels, 25))
-    p75 = float(np.percentile(pixels, 75))
-    p90 = float(np.percentile(pixels, 90))
+    area = float(props.area)
+    filled_area = float(props.filled_area)
+    # faster perimeter on binary (Crofton is also available but this is fine/consistent)
+    perimeter = float(sk_perimeter(mask, neighbourhood=8))
+    minr, minc, maxr, maxc = props.bbox
+    h, w = (maxr - minr), (maxc - minc)
+    bbox_area = float(w * h) if (w > 0 and h > 0) else np.nan
+    extent = area / bbox_area if bbox_area and not np.isnan(bbox_area) else np.nan
+    aspect_ratio = (w / float(h)) if h > 0 else np.nan
 
-    # GLCM texture features: compute on masked region by cropping to bounding box
-    coords = np.column_stack(np.where(mask > 0))
-    minr, minc = coords.min(axis=0)
-    maxr, maxc = coords.max(axis=0)
-    roi = gray_img[minr:maxr+1, minc:maxc+1]
-    roi_mask = mask[minr:maxr+1, minc:maxc+1]
+    equiv_diameter = float(props.equivalent_diameter)
+    major_axis_length = float(props.major_axis_length)
+    minor_axis_length = float(props.minor_axis_length)
+    orientation = float(props.orientation)
+    convex_area = float(props.convex_area)
+    eccentricity = float(props.eccentricity)
+    solidity = float(props.solidity)
+    euler_number = float(props.euler_number)
 
-    # Quantize ROI to 8 gray levels (0–7)
-    roi_quant = np.floor(roi / 32).astype(np.uint8)
-    roi_quant[roi_mask == 0] = 0  # force background to zero
+    circularity = (4.0 * np.pi * area / (perimeter ** 2)) if perimeter > 0 else np.nan
 
-    glcm = graycomatrix(
-        roi_quant,
-        distances=distances,
-        angles=angles,
-        levels=8,
-        symmetric=True,
-        normed=True
-    )
+    # contours / convex hull on the tight mask only
+    cnts, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    cnt = max(cnts, key=cv2.contourArea)
+    hull = cv2.convexHull(cnt, returnPoints=True)
+    hull_pts_local = hull.reshape(-1, 2)  # (x, y) = (col, row)
 
-    contrast = float(np.mean(graycoprops(glcm, 'contrast')))
-    dissimilarity = float(np.mean(graycoprops(glcm, 'dissimilarity')))
-    homogeneity = float(np.mean(graycoprops(glcm, 'homogeneity')))
-    ASM = float(np.mean(graycoprops(glcm, 'ASM')))
-    energy = float(np.mean(graycoprops(glcm, 'energy')))
-    correlation = float(np.mean(graycoprops(glcm, 'correlation')))
+    # global row/col
+    hull_global = np.column_stack([hull_pts_local[:, 1] + minr, hull_pts_local[:, 0] + minc])
+
+    convex_perimeter = float(cv2.arcLength(hull, True))
+
+    # Feret diameter (max caliper distance): use rotating calipers via minAreaRect diagonal as an efficient proxy,
+    # or fall back to OpenCV distance transform on hull contour.
+    # If you have skimage>=0.19, use props.feret_diameter_max directly (fast). Here’s a robust fallback:
+    hp = hull_pts_local.astype(np.float32)
+    if hp.shape[0] >= 2:
+        rect = cv2.minAreaRect(hp)
+        (rw, rh) = rect[1]
+        feret_diameter_max = float(max(rw, rh))
+    else:
+        feret_diameter_max = 0.0
+
+    # Hu moments (on tight mask)
+    m = cv2.moments(mask.astype(np.uint8))
+    hu = cv2.HuMoments(m).flatten()
+
+    # Skeleton & endpoints (vectorized)
+    skel = skeletonize(mask, method="lee")
+    skeleton_length = int(np.count_nonzero(skel))
+    if skeleton_length == 0:
+        endpoints = 0
+    else:
+        neigh = ndi.convolve(skel.astype(np.uint8), _NEIGHBOR_KERNEL, mode='constant', cval=0)
+        # neigh counts self too; for endpoints we want exactly one neighbor -> neigh == 2 (self + 1 neighbor)
+        endpoints = int(np.sum((neigh == 2) & skel))
 
     return {
-        'mean_intensity': mean_intensity,
-        'median_intensity': median_intensity,
-        'std_intensity': std_intensity,
-        'min_intensity': min_intensity,
-        'max_intensity': max_intensity,
-        'skewness': skewness,
-        'kurtosis': kurt,
-        'entropy': entropy,
-        'percentile_10': p10,
-        'percentile_25': p25,
-        'percentile_75': p75,
-        'percentile_90': p90,
-        'glcm_contrast': contrast,
-        'glcm_dissimilarity': dissimilarity,
-        'glcm_homogeneity': homogeneity,
-        'glcm_ASM': ASM,
-        'glcm_energy': energy,
-        'glcm_correlation': correlation,
-        'dt': AVERAGE_TIMESTEP
+        'centroid_row': float(props.centroid[0]),
+        'centroid_col': float(props.centroid[1]),
+        'area': area,
+        'filled_area': filled_area,
+        'perimeter': perimeter,
+        'bbox': (int(minr), int(minc), int(maxr), int(maxc)),
+        'bounding_box_area': bbox_area,
+        'extent': float(extent),
+        'aspect_ratio': float(aspect_ratio),
+        'equivalent_diameter': equiv_diameter,
+        'major_axis_length': major_axis_length,
+        'minor_axis_length': minor_axis_length,
+        'orientation': orientation,
+        'convex_area': convex_area,
+        'convex_hull': hull_global.astype(np.int32),
+        'convex_perimeter': convex_perimeter,
+        'solidity': solidity,
+        'eccentricity': eccentricity,
+        'euler_number': euler_number,
+        'circularity': float(circularity),
+        'feret_diameter_max': feret_diameter_max,
+        'hu_moments': hu,                  # (7,)
+        'skeleton_length': skeleton_length,
+        'endpoints': endpoints,
+        'dt': AVERAGE_TIMESTEP,
     }
 
 
