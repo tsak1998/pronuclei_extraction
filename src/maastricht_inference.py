@@ -482,7 +482,7 @@ if __name__ == "__main__":
     )
     model_pronuclei.eval()
 
-    model_pronuclei.to("cuda")
+    model_pronuclei.to(device)
 
     all_pn_areas = []
     
