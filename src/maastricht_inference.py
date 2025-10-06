@@ -435,7 +435,7 @@ if __name__ == "__main__":
                         default="/home/tsakalis/ntua/phd/maastricht/pronuclei_extraction/data",
                         help="Primary path to look for samples")
 
-    parser.add_argument("--output_dir", type=str, default="/home/tsakalis/pn_samples_all",
+    parser.add_argument("--output_dir", type=str, default="data/extracted_signals",
                         help="Directory to save output videos")
     parser.add_argument("--max_frames", type=int, default=200,
                         help="Maximum number of frames to process per sample")
@@ -448,8 +448,8 @@ if __name__ == "__main__":
 
 
     # Create the directory for saving masks
-    masks_output_dir = Path("data/extracted_masks")
-    masks_output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     model_pronuclei = smp.DPT(
         encoder_name="tu-vit_base_patch16_224.augreg_in21k",
@@ -466,8 +466,7 @@ if __name__ == "__main__":
 
 
     type_of_problem = "multilabel"
-    model_name = "multiclass_dpt-vit_base_patch16_224.augreg_in21k_3_classes_WHOLE_SINGLE_MASK_FINAL2"#"multiclass_ub5"-mit_
-    
+
     
     data_path = Path(args.data_path)
 
@@ -492,36 +491,43 @@ if __name__ == "__main__":
     # pn1_features_intens =[]
     # pn2_features_intens = []
     whole_emb_all = []
-
+    
     for _, row in slide_info_df.iterrows():
         
+        try: 
+            sample_pth= data_path/f"videoframe/{row['embryoID']}"
 
-        sample_pth= data_path/f"videoframe/{row['embryoID']}"
-    # for sample_idx, sample_pth in enumerate((data_path/"videoframe").glob('*')):
+            slide_images, slide_masks, sample_id, image_filenames = inference_whole_slide(
+                model_pronuclei, sample_pth, args.max_frames
+            )
 
+            pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
+            pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
+            
+            whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
 
-    #     for well_pth in sample_pth.glob('*'):
-    #         # Get inference results
-        slide_images, slide_masks, sample_id, image_filenames = inference_whole_slide(
-            model_pronuclei, sample_pth, args.max_frames
-        )
-        
-        # Create directory for this sample ID
-        sample_mask_dir = masks_output_dir / sample_id
-        sample_mask_dir.mkdir(exist_ok=True)
+            pn1_features['embryo_id'] = row['embryoID']
+            pn2_features['embryo_id'] = row['embryoID']
+            whole_emb['embryo_id'] = row['embryoID']
 
+            pn1_features['y'] = row['abnormality']
+            pn2_features['y'] = row['abnormality']
+            whole_emb['y'] = row['abnormality']
+            
+            pn1_features_all.append(pn1_features)
+            pn2_features_all.append(pn2_features)
+            whole_emb_all.append(whole_emb)
 
-        pn1_features = pd.DataFrame([extract_shape_geometry_features(msk[0]) for msk in slide_masks])
-        pn2_features = pd.DataFrame([extract_shape_geometry_features(msk[1]) for msk in slide_masks])
-        
-        whole_emb = pd.DataFrame([extract_shape_geometry_features(msk[2]) for msk in slide_masks])
-
-        pn1_features_all.append(pn1_features)
-        pn2_features_all.append(pn2_features)
-
-        whole_emb_all.append(whole_emb)
+        except Exception as e:
+            print(row)
 
     full_pn1_df = pd.concat(pn1_features_all).reset_index(drop=True)
     full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
     full_emb_df = pd.concat(whole_emb_all).reset_index(drop=True)
 
+    full_pn1_df.to_csv(output_dir/'full_pn1_df.csv',index=False)
+    full_pn2_df.to_csv(output_dir/'full_pn2_df.csv',index=False)
+    full_emb_df.to_csv(output_dir/'full_emb_df.csv',index=False)
+    
+
+    
