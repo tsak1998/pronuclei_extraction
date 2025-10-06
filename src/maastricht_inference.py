@@ -470,7 +470,7 @@ if __name__ == "__main__":
     
     data_path = Path(args.data_path)
 
-    slide_info_df = pd.read_csv(data_path/"embryo_frame_abnormality.csv")
+    slide_info_df = pd.read_csv(data_path/"embryo_video_abnormality_202509.csv")
 
 
     model_pronuclei.load_state_dict(
