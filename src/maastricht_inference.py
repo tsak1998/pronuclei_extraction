@@ -35,6 +35,7 @@ from skimage.feature import graycomatrix, graycoprops
 
 from scipy.stats import skew, kurtosis
 
+
 AVERAGE_TIMESTEP = 1.0  # or whatever your dt is
 
 
@@ -362,7 +363,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
         list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem.split("frame")[1])
     )[:max_frame]
 
-    images = [Image.open(img_path) for img_path in image_file_paths]
+    images = [Image.open(img_path).rotate(-90) for img_path in image_file_paths]
     # Store original filenames for later use when saving masks
     image_filenames = [img_path.stem for img_path in image_file_paths]
 
@@ -381,7 +382,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
             pred_mask = model(inpt_images.to(device))
             #
             # masks = torch.softmax(pred_mask,axis=1).cpu().numpy()>0.5
-            masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.05
+            masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.5
 
             all_masks.extend([msk for msk in masks])
             # breakpoint()
@@ -390,32 +391,34 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
     final_images = []
     upscaled_masks = []
     isolated_pns = []
+    img_dim = 500
     for pil_img, mask in zip(images[:], all_masks[:]):
+
         # Ensure the mask is 2D by removing extra dimensions
-        # pil_img = pil_img.resize((224, 224), Image.Resampling.LANCZOS)
-        image_ar = np.stack(3 * [np.array(pil_img)])
+        pil_img = pil_img.resize((img_dim, img_dim), Image.Resampling.LANCZOS)
+        image_ar = np.stack(3 * [np.array(pil_img)[:,:,0]])
 
         upscaled_mask1 = cv2.resize(
-            mask[1].astype(np.uint8), (500, 500), interpolation=cv2.INTER_NEAREST
+            mask[1].astype(np.uint8), (img_dim, img_dim), interpolation=cv2.INTER_NEAREST
         )
         upscaled_mask2 = cv2.resize(
-            mask[0].astype(np.uint8), (500, 500), interpolation=cv2.INTER_NEAREST
+            mask[0].astype(np.uint8), (img_dim, img_dim), interpolation=cv2.INTER_NEAREST
         )
         upscaled_mask3 = cv2.resize(
-            mask[2].astype(np.uint8), (500, 500), interpolation=cv2.INTER_NEAREST
+            mask[2].astype(np.uint8), (img_dim, img_dim), interpolation=cv2.INTER_NEAREST
         )
 
         # pn_size.append(upscaled_mask.sum())
-
+        # breakpoint()
         upscaled_masks.append((upscaled_mask1, upscaled_mask2, upscaled_mask3))
         image_pn_isolated = image_ar.copy()
-        # image_pn_isolated[:, ~upscaled_mask1.astype(bool)] = 0
-        # isolated_pns.append(image_pn_isolated.transpose(1, 2, 0))
-        # image_ar[0, upscaled_mask1.astype(bool)] = 1
-        # image_ar[1, upscaled_mask2.astype(bool)] = 1
-        # image_ar[2, upscaled_mask3.astype(bool)] = 1
+        image_pn_isolated[:, ~upscaled_mask1.astype(bool)] = 0
+        isolated_pns.append(image_pn_isolated.transpose(1, 2, 0))
+        image_ar[0, upscaled_mask1.astype(bool)] = 1
+        image_ar[1, upscaled_mask2.astype(bool)] = 1
+        image_ar[2, upscaled_mask3.astype(bool)] = 1
 
-        # final_images.append(Image.fromarray(image_ar.transpose(1, 2, 0)))
+        final_images.append(Image.fromarray(image_ar.transpose(1, 2, 0)))
 
     return (
         final_images,
@@ -434,7 +437,71 @@ def extract_all(msk_triplet):
 
 def to_df(records):
     return pd.DataFrame.from_records(records)
+from contextlib import contextmanager
+import cv2
+import numpy as np
+# import matplotlib.pyplot as plt
 
+@contextmanager
+def video_writer_context(output_path, frame_height, frame_width, fps=15, fourcc="mp4v"):
+    # Output is [frame | live-plot], so width doubles
+    output_size = (frame_width * 2, frame_height)
+    writer = cv2.VideoWriter(
+        str(output_path),
+        cv2.VideoWriter_fourcc(*fourcc),  # 'mp4v' for .mp4; try 'avc1' if available
+        fps,
+        output_size,
+    )
+    if not writer.isOpened():
+        raise RuntimeError("Failed to open VideoWriter. Try a different path/fourcc.")
+    try:
+        yield writer
+    finally:
+        writer.release()  # no destroyAllWindows() in headless
+
+def generate_video(slide_images, slide_masks, output_path, frame_height=500, frame_width=500, fps=15):
+    pn_size1, pn_size2 = [], []
+
+    with video_writer_context(output_path, frame_height, frame_width, fps=fps) as writer:
+        for frame_idx, frame in enumerate(slide_images):
+            # --- accumulate PN areas (expect (pn1, pn2, whole)) ---
+            m = slide_masks[frame_idx]
+            if len(m) >= 2:
+                pn_size1.append(int(m[0].sum()))
+                pn_size2.append(int(m[1].sum()))
+            else:
+                pn_size1.append(0)
+                pn_size2.append(0)
+
+            # --- make plot as RGB array ---
+            x = np.arange(1, len(pn_size1) + 1)
+            fig, ax = plt.subplots()
+            ax.plot(x, pn_size1)
+            ax.plot(x, pn_size2)
+            ax.legend(["PN 1", "PN 2"])
+            ax.set_title(f"Accumulated PN Size (Frame {frame_idx})")
+            ax.set_xlabel("Frame")
+            ax.set_ylabel("Accumulated Area")
+            fig.tight_layout()
+            fig.canvas.draw()
+            plot_rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
+            plt.close(fig)
+
+            # --- prep left frame (BGR, resized HxW) ---
+            fr = np.array(frame)  # PIL->ndarray (RGB)
+            if fr.ndim == 2:
+                fr = cv2.cvtColor(fr, cv2.COLOR_GRAY2BGR)
+            else:
+                fr = cv2.cvtColor(fr, cv2.COLOR_RGB2BGR)
+            fr = cv2.resize(fr, (frame_width, frame_height), interpolation=cv2.INTER_AREA)
+
+            # --- prep right plot (BGR, same HxW) ---
+            plot_bgr = cv2.cvtColor(plot_rgb, cv2.COLOR_RGB2BGR)
+            plot_bgr = cv2.resize(plot_bgr, (frame_width, frame_height), interpolation=cv2.INTER_AREA)
+
+            # --- concatenate and write ---
+            combined = np.hstack((fr, plot_bgr))
+            writer.write(combined)
 
 if __name__ == "__main__":
 
@@ -458,7 +525,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="home/pantelis/pronuclei_extraction/extracted_data",
+        default="/home/tsakalis/ntua/phd/maastricht/pronuclei_extraction/data/extracted_data",
         help="Directory to save output videos",
     )
     parser.add_argument(
@@ -521,6 +588,13 @@ if __name__ == "__main__":
             slide_images, slide_masks, sample_id, image_filenames = (
                 inference_whole_slide(model_pronuclei, sample_pth, args.max_frames)
             )
+
+            # output_path = Path(
+            # f"/home/tsakalis/pn_samples_all/seperate_pn_maas.mp4"
+            # )
+            # # breakpoint()
+            # generate_video(slide_images, slide_masks, output_path) 
+
 
             n_workers = int(
                 os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() // 4 or 4)
