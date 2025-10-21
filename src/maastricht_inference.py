@@ -240,118 +240,33 @@ def extract_shape_geometry_features(img: np.ndarray):
     }
 
 
-def extract_intensity_features(
-    gray_img: np.ndarray, mask: np.ndarray, distances=[1], angles=[0]
-):
+import numpy as np
+from skimage.measure import label, regionprops_table
+
+def extract_shape_geometry_features(img: np.ndarray, min_area: int = 5):
     """
-    Given a 2D grayscale image and a binary mask (same dimensions), compute
-    intensity-based features over the region where mask>0. Returns:
-      - mean_intensity
-      - median_intensity
-      - std_intensity
-      - min_intensity
-      - max_intensity
-      - skewness
-      - kurtosis
-      - entropy (Shannon)
-      - percentiles (10th, 25th, 75th, 90th)
-      - GLCM texture features: contrast, dissimilarity, homogeneity, ASM, energy, correlation
-        (averaged over specified distances and angles)
-      - dt (not meaningful here, but kept for consistency)
+    Return centroid_row, centroid_col, and area of the largest blob in a binary mask.
+    Uses regionprops_table to compute only 'area' and 'centroid'.
     """
-    # Extract pixel values under mask
-    pixels = gray_img[mask > 0].ravel().astype(np.float64)
-    if pixels.size == 0:
-        return {
-            "mean_intensity": None,
-            "median_intensity": None,
-            "std_intensity": None,
-            "min_intensity": None,
-            "max_intensity": None,
-            "skewness": None,
-            "kurtosis": None,
-            "entropy": None,
-            "percentile_10": None,
-            "percentile_25": None,
-            "percentile_75": None,
-            "percentile_90": None,
-            "glcm_contrast": None,
-            "glcm_dissimilarity": None,
-            "glcm_homogeneity": None,
-            "glcm_ASM": None,
-            "glcm_energy": None,
-            "glcm_correlation": None,
-            "dt": None,
-        }
+    binary = img > 0
+    if not np.any(binary):
+        return {"centroid_row": None, "centroid_col": None, "area": None}
 
-    # Basic statistics
-    mean_intensity = float(np.mean(pixels))
-    median_intensity = float(np.median(pixels))
-    std_intensity = float(np.std(pixels))
-    min_intensity = float(np.min(pixels))
-    max_intensity = float(np.max(pixels))
-    skewness = float(skew(pixels))
-    kurt = float(kurtosis(pixels))
+    labeled = label(binary)
+    tbl = regionprops_table(labeled, properties=('area', 'centroid'))
+    areas = np.asarray(tbl['area'])
+    if areas.size == 0:
+        return {"centroid_row": None, "centroid_col": None, "area": None}
 
-    # Shannon entropy over pixel histogram (256 bins)
-    hist, _ = np.histogram(pixels, bins=256, range=(0, 255), density=True)
-    # avoid log(0) by masking
-    hist_nonzero = hist[hist > 0]
-    entropy = float(-np.sum(hist_nonzero * np.log2(hist_nonzero)))
-
-    # Percentiles
-    p10 = float(np.percentile(pixels, 10))
-    p25 = float(np.percentile(pixels, 25))
-    p75 = float(np.percentile(pixels, 75))
-    p90 = float(np.percentile(pixels, 90))
-
-    # GLCM texture features: compute on masked region by cropping to bounding box
-    coords = np.column_stack(np.where(mask > 0))
-    minr, minc = coords.min(axis=0)
-    maxr, maxc = coords.max(axis=0)
-    roi = gray_img[minr : maxr + 1, minc : maxc + 1]
-    roi_mask = mask[minr : maxr + 1, minc : maxc + 1]
-
-    # Quantize ROI to 8 gray levels (0–7)
-    roi_quant = np.floor(roi / 32).astype(np.uint8)
-    roi_quant[roi_mask == 0] = 0  # force background to zero
-
-    glcm = graycomatrix(
-        roi_quant,
-        distances=distances,
-        angles=angles,
-        levels=8,
-        symmetric=True,
-        normed=True,
-    )
-
-    contrast = float(np.mean(graycoprops(glcm, "contrast")))
-    dissimilarity = float(np.mean(graycoprops(glcm, "dissimilarity")))
-    homogeneity = float(np.mean(graycoprops(glcm, "homogeneity")))
-    ASM = float(np.mean(graycoprops(glcm, "ASM")))
-    energy = float(np.mean(graycoprops(glcm, "energy")))
-    correlation = float(np.mean(graycoprops(glcm, "correlation")))
+    i = int(np.argmax(areas))
+    area = int(areas[i])
+    if area < min_area:
+        return {"centroid_row": None, "centroid_col": None, "area": None}
 
     return {
-        "mean_intensity": mean_intensity,
-        "median_intensity": median_intensity,
-        "std_intensity": std_intensity,
-        "min_intensity": min_intensity,
-        "max_intensity": max_intensity,
-        "skewness": skewness,
-        "kurtosis": kurt,
-        "entropy": entropy,
-        "percentile_10": p10,
-        "percentile_25": p25,
-        "percentile_75": p75,
-        "percentile_90": p90,
-        "glcm_contrast": contrast,
-        "glcm_dissimilarity": dissimilarity,
-        "glcm_homogeneity": homogeneity,
-        "glcm_ASM": ASM,
-        "glcm_energy": energy,
-        "glcm_correlation": correlation,
-        "dt": AVERAGE_TIMESTEP,
+        "centroid_row": float(tbl['centroid-0'][i]),
+        "centroid_col": float(tbl['centroid-1'][i]),
+        "area": area,
     }
 
 
@@ -360,10 +275,10 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
     sample_id = slide_pth.name
 
     image_file_paths = sorted(
-        list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem.split("frame")[1])
+        list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem)
     )[:max_frame]
 
-    images = [Image.open(img_path).rotate(-90) for img_path in image_file_paths]
+    images = [Image.open(img_path) for img_path in image_file_paths]
     # Store original filenames for later use when saving masks
     image_filenames = [img_path.stem for img_path in image_file_paths]
 
@@ -382,7 +297,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
             pred_mask = model(inpt_images.to(device))
             #
             # masks = torch.softmax(pred_mask,axis=1).cpu().numpy()>0.5
-            masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.5
+            masks = torch.sigmoid(pred_mask).cpu().numpy() > 0.05
 
             all_masks.extend([msk for msk in masks])
             # breakpoint()
@@ -396,7 +311,7 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
 
         # Ensure the mask is 2D by removing extra dimensions
         pil_img = pil_img.resize((img_dim, img_dim), Image.Resampling.LANCZOS)
-        image_ar = np.stack(3 * [np.array(pil_img)[:,:,0]])
+        image_ar = np.stack(3 * [np.array(pil_img)])
 
         upscaled_mask1 = cv2.resize(
             mask[1].astype(np.uint8), (img_dim, img_dim), interpolation=cv2.INTER_NEAREST
@@ -547,22 +462,36 @@ if __name__ == "__main__":
         in_channels=3,
         classes=3,
     )
-    # model_pronuclei = smp.Unet(
-    #     encoder_name="mit_b5",
-    #     encoder_weights="imagenet",
-    #     in_channels=4,
-    #     classes=4,
-    # )
+
+    SINGLE_MASK_MODEL_WEIGHTS = 'multiclass_dpt-vit_base_patch16_224.augreg_in21k_3_classes_WHOLE_SINGLE_MASK_FINAL.pt'
+    model_pronuclei_single = smp.DPT(
+        encoder_name="tu-vit_base_patch16_224.augreg_in21k",
+        encoder_weights="imagenet",
+        in_channels=3,
+        classes=3,
+    )
+
 
     type_of_problem = "multilabel"
 
     data_path = Path(args.data_path)
 
-    slide_info_df = pd.read_csv(data_path / "embryo_video_abnormality_202509.csv")
+    slide_info_df = pd.read_csv(data_path / "full_pth_data.csv")
 
+    ##### seperatate pronuclei model
     model_pronuclei.load_state_dict(
         torch.load(
             args.model_weights, weights_only=True, map_location=torch.device(device)
+        )
+    )
+    model_pronuclei.eval()
+
+    model_pronuclei.to(device)
+
+    ##### Unified mask pronuclei model
+    model_pronuclei.load_state_dict(
+        torch.load(
+            f"/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/{SINGLE_MASK_MODEL_WEIGHTS}", weights_only=True, map_location=torch.device(device)
         )
     )
     model_pronuclei.eval()
@@ -578,12 +507,14 @@ if __name__ == "__main__":
     # pn2_features_intens = []
     whole_emb_all = []
 
-    for _, row in tqdm(slide_info_df.iterrows()):
+    model_pronuclei.compile()
+
+    for _, row in tqdm(slide_info_df.iterrows(), total=len(slide_info_df)):
 
         try:
-            sample_pth = data_path / f"videoframe/{row['embryoID']}"
+            sample_pth = Path(row['pth'])#data_path / f"videoframe/{row['embryoID']}"
 
-            print(sample_pth)
+
 
             slide_images, slide_masks, sample_id, image_filenames = (
                 inference_whole_slide(model_pronuclei, sample_pth, args.max_frames)
@@ -616,23 +547,24 @@ if __name__ == "__main__":
             pn2_features["embryo_id"] = row["embryoID"]
             whole_emb["embryo_id"] = row["embryoID"]
 
-            pn1_features["y"] = row["abnormality"]
-            pn2_features["y"] = row["abnormality"]
-            whole_emb["y"] = row["abnormality"]
+            # pn1_features["y"] = row["abnormality"]
+            # pn2_features["y"] = row["abnormality"]
+            # whole_emb["y"] = row["abnormality"]
 
             pn1_features_all.append(pn1_features)
             pn2_features_all.append(pn2_features)
             whole_emb_all.append(whole_emb)
-
+            # break
         except Exception as e:
             print(e)
             print(row)
             break
+        
 
     full_pn1_df = pd.concat(pn1_features_all).reset_index(drop=True)
-    full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
+    # full_pn2_df = pd.concat(pn2_features_all).reset_index(drop=True)
     full_emb_df = pd.concat(whole_emb_all).reset_index(drop=True)
 
-    full_pn1_df.to_csv(output_dir / "full_pn1_df.csv", index=False)
-    full_pn2_df.to_csv(output_dir / "full_pn2_df.csv", index=False)
-    full_emb_df.to_csv(output_dir / "full_emb_df.csv", index=False)
+    full_pn1_df.to_csv(output_dir / "full_pns_df_single.csv", index=False)
+    # full_pn2_df.to_csv(output_dir / "full_pn2_df.csv", index=False)
+    full_emb_df.to_csv(output_dir / "full_emb_df_single.csv", index=False)
