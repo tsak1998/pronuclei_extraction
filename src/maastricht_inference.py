@@ -476,7 +476,8 @@ if __name__ == "__main__":
 
     data_path = Path(args.data_path)
 
-    slide_info_df = pd.read_csv(data_path / "full_pth_data.csv")
+    # slide_info_df = pd.read_csv(data_path / "full_pth_data.csv")
+    slide_info_df = pd.read_csv(data_path / "embryo_video_abnormality_202509.csv")
 
     ##### seperatate pronuclei model
     # model_pronuclei.load_state_dict(
@@ -512,7 +513,7 @@ if __name__ == "__main__":
     for _, row in tqdm(slide_info_df.iterrows(), total=len(slide_info_df)):
 
         try:
-            sample_pth = Path(row['pth'])#data_path / f"videoframe/{row['embryoID']}"
+            sample_pth = data_path / f"videoframe/{row['embryoID']}"#Path(row['pth'])#
 
 
 
