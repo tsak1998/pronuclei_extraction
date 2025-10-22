@@ -311,7 +311,8 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
 
         # Ensure the mask is 2D by removing extra dimensions
         pil_img = pil_img.resize((img_dim, img_dim), Image.Resampling.LANCZOS)
-        image_ar = np.stack(3 * [np.array(pil_img)])
+        # image_ar = np.stack(3 * [np.array(pil_img)])
+        image_ar = np.stack(3 * [np.array(pil_img)[:,:,0]])
 
         upscaled_mask1 = cv2.resize(
             mask[1].astype(np.uint8), (img_dim, img_dim), interpolation=cv2.INTER_NEAREST
