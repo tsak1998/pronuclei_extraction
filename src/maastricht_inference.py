@@ -479,19 +479,19 @@ if __name__ == "__main__":
     slide_info_df = pd.read_csv(data_path / "full_pth_data.csv")
 
     ##### seperatate pronuclei model
-    model_pronuclei.load_state_dict(
-        torch.load(
-            args.model_weights, weights_only=True, map_location=torch.device(device)
-        )
-    )
-    model_pronuclei.eval()
+    # model_pronuclei.load_state_dict(
+    #     torch.load(
+    #         args.model_weights, weights_only=True, map_location=torch.device(device)
+    #     )
+    # )
+    # model_pronuclei.eval()
 
-    model_pronuclei.to(device)
+    # model_pronuclei.to(device)
 
     ##### Unified mask pronuclei model
     model_pronuclei.load_state_dict(
         torch.load(
-            f"/home/tsakalis/ntua/phd/cellforge/cellforge/model_weights/{SINGLE_MASK_MODEL_WEIGHTS}", weights_only=True, map_location=torch.device(device)
+            args.model_weights, weights_only=True, map_location=torch.device(device)
         )
     )
     model_pronuclei.eval()
