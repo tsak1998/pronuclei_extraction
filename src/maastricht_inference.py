@@ -515,7 +515,7 @@ if __name__ == "__main__":
         try:
             sample_pth = data_path / f"videoframe/{row['embryoID']}"#Path(row['pth'])#
 
-
+            print(sample_pth)
 
             slide_images, slide_masks, sample_id, image_filenames = (
                 inference_whole_slide(model_pronuclei, sample_pth, args.max_frames)
