@@ -508,7 +508,7 @@ if __name__ == "__main__":
     # pn2_features_intens = []
     whole_emb_all = []
 
-    model_pronuclei.compile()
+    # model_pronuclei.compile
 
     for _, row in tqdm(slide_info_df.iterrows(), total=len(slide_info_df)):
 
