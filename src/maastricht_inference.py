@@ -278,7 +278,8 @@ def inference_whole_slide(model, slide_pth: Path, max_frame: int):
         list(slide_pth.glob("*.jpg")), key=lambda x: int(x.stem.split("frame")[1])
     )[:max_frame]
 
-    images = [Image.open(img_path) for img_path in image_file_paths]
+    # images = [Image.open(img_path) for img_path in image_file_paths]
+    images = [Image.open(img_path).rotate(-90) for img_path in image_file_paths]
     # Store original filenames for later use when saving masks
     image_filenames = [img_path.stem for img_path in image_file_paths]
 
